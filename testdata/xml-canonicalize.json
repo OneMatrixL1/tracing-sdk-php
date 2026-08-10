@@ -1,5 +1,4 @@
 {
-    "$schema": "Cross-language test vectors for the SDK's XML canonicalizer.",
     "description": "Rule: parse the XML and serialize it using W3C Canonical XML (C14N) — https://www.w3.org/TR/xml-c14n — which normalizes attribute order and insignificant whitespace between elements. Every language SDK's canonicalizer must produce exactly `expectedOutput` (byte-for-byte) for every string in `input`/`inputs`. External entity resolution MUST be disabled: parsing untrusted XML must never fetch or inline external/SYSTEM entities (XXE).",
     "format": {
         "algorithm": "W3C Canonical XML 1.0 (C14N), no comments, no exclusive namespace processing needed for these fixtures (none use namespaces)",

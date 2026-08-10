@@ -1,5 +1,4 @@
 {
-    "$schema": "Cross-language test vectors for the SDK's Keccak-256 hasher.",
     "description": "Keccak-256 (the original Keccak submission — NOT FIPS-202/SHA3-256) applied to a UTF-8 encoded input string. Every language SDK's hasher must reproduce expectedHash (lowercase hex, 0x-prefixed, 64 hex digits) for each case.",
     "algorithm": "keccak256",
     "encoding": "utf-8",

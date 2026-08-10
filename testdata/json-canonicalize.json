@@ -1,5 +1,4 @@
 {
-    "$schema": "Cross-language test vectors for the SDK's JSON canonicalizer.",
     "description": "The canonicalizer must implement RFC 8785 (JSON Canonicalization Scheme / JCS): https://www.rfc-editor.org/rfc/rfc8785. Decode the JSON, then re-serialize with object member names sorted by UTF-16 code unit value, numbers formatted per the ECMAScript `Number::toString` algorithm (so `1`, `1.0`, and `1e0` all collapse to the same output), and minimal string escaping. Every language SDK's canonicalizer must produce exactly `expectedOutput` (byte-for-byte) for every string in `input`/`inputs`.",
     "format": {
         "objectKeyOrder": "sorted ascending by UTF-16 code UNIT value (RFC 8785 section 3.2.3) — NOT byte order and NOT Unicode code point order; these disagree for characters outside the Basic Multilingual Plane (see the `utf16-surrogate-sorts-before-bmp` case)",
@@ -141,6 +140,102 @@
             "description": "1e-7 is exactly at the threshold where ECMAScript Number::toString switches to exponential notation",
             "input": "{\"a\":1.0e-7}",
             "expectedOutput": "{\"a\":1e-7}"
+        },
+        {
+            "id": "simple-object-sorted",
+            "description": "A flat object's keys are sorted",
+            "input": "{\"b\":2,\"a\":1}",
+            "expectedOutput": "{\"a\":1,\"b\":2}"
+        },
+        {
+            "id": "nested-object-sorted",
+            "description": "A nested object's keys are sorted",
+            "input": "{\"outer\":{\"b\":2,\"a\":1}}",
+            "expectedOutput": "{\"outer\":{\"a\":1,\"b\":2}}"
+        },
+        {
+            "id": "unicode-key-sorts-by-utf16-code-unit",
+            "description": "A non-ASCII key (é, U+00E9) sorts after an ASCII key with a smaller code unit value (e, U+0065)",
+            "input": "{\"é\":1,\"e\":2}",
+            "expectedOutput": "{\"e\":2,\"é\":1}"
+        },
+        {
+            "id": "float-with-zero-fraction-collapses-to-integer",
+            "description": "A float literal with a zero fractional part canonicalizes to its integer form",
+            "input": "{\"n\":1.0}",
+            "expectedOutput": "{\"n\":1}"
+        },
+        {
+            "id": "empty-object-top-level",
+            "description": "A top-level empty object canonicalizes to {}",
+            "input": "{}",
+            "expectedOutput": "{}"
+        },
+        {
+            "id": "empty-array-top-level",
+            "description": "A top-level empty array canonicalizes to []",
+            "input": "[]",
+            "expectedOutput": "[]"
+        },
+        {
+            "id": "array-of-objects-different-values",
+            "description": "Keys within each object of an array are sorted independently (additional case with different values than array-of-objects-keys-sorted)",
+            "input": "[{\"b\":2,\"a\":1},{\"d\":4,\"c\":3}]",
+            "expectedOutput": "[{\"a\":1,\"b\":2},{\"c\":3,\"d\":4}]"
+        },
+        {
+            "id": "top-level-null",
+            "description": "A top-level JSON null canonicalizes to null",
+            "input": "null",
+            "expectedOutput": "null"
+        },
+        {
+            "id": "boolean-values-sorted",
+            "description": "Boolean-valued object members, keys sorted",
+            "input": "{\"false\":false,\"true\":true}",
+            "expectedOutput": "{\"false\":false,\"true\":true}"
+        },
+        {
+            "id": "string-escaping-quote-backslash-newline",
+            "description": "Quote, backslash, and newline characters in string values are escaped minimally",
+            "input": "{\"quote\":\"a\\\"b\",\"backslash\":\"a\\\\b\",\"newline\":\"a\\nb\"}",
+            "expectedOutput": "{\"backslash\":\"a\\\\b\",\"newline\":\"a\\nb\",\"quote\":\"a\\\"b\"}"
+        },
+        {
+            "id": "unicode-string-value-not-escaped",
+            "description": "Non-ASCII characters in string values (accented Latin, CJK, emoji) are left unescaped",
+            "input": "{\"text\":\"café 日本語 😀\"}",
+            "expectedOutput": "{\"text\":\"café 日本語 😀\"}"
+        },
+        {
+            "id": "nested-arrays-of-numbers",
+            "description": "Nested arrays preserve element order at every level",
+            "input": "[[1,2],[3,4]]",
+            "expectedOutput": "[[1,2],[3,4]]"
+        },
+        {
+            "id": "complex-mixed-structure",
+            "description": "A mix of nested objects, arrays, booleans, and null all canonicalize together: object keys sorted at every level, array order preserved",
+            "input": "{\"z\":[1,2,3],\"a\":{\"nested\":true,\"array\":[{\"b\":2},{\"a\":1}]},\"m\":null}",
+            "expectedOutput": "{\"a\":{\"array\":[{\"b\":2},{\"a\":1}],\"nested\":true},\"m\":null,\"z\":[1,2,3]}"
+        },
+        {
+            "id": "float-values-no-trailing-zeros",
+            "description": "Float values canonicalize without trailing zeros, including negative values",
+            "input": "{\"float\":1.5,\"zero\":0.0,\"negative\":-42.0}",
+            "expectedOutput": "{\"float\":1.5,\"negative\":-42,\"zero\":0}"
+        },
+        {
+            "id": "empty-string-key-sorts-first",
+            "description": "An empty string key sorts before any non-empty key",
+            "input": "{\"\":\"empty key\",\"a\":\"normal key\"}",
+            "expectedOutput": "{\"\":\"empty key\",\"a\":\"normal key\"}"
+        },
+        {
+            "id": "rfc8785-numbers-example",
+            "description": "A representative mix of ECMAScript Number::toString outputs: shortest round-trippable digits, exponential notation above the 1e21 threshold, plain decimal below it",
+            "input": "{\"numbers\":[333333333.3333333,1.0e30,4.5,6,0.002,0.000002]}",
+            "expectedOutput": "{\"numbers\":[333333333.3333333,1e+30,4.5,6,0.002,0.000002]}"
         },
         {
             "id": "utf16-surrogate-sorts-before-bmp",
