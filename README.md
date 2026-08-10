@@ -7,7 +7,7 @@ Requires PHP 7.1+ or 8.x, plus the `json`, `dom`, `libxml`, and `curl` extension
 ## Install
 
 ```bash
-composer require tracing/sdk
+composer require onematrix/tracing-sdk
 ```
 
 ## Usage
