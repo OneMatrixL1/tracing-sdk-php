@@ -27,15 +27,15 @@ class MtlsAuthenticator implements AuthenticatorInterface
     public function __construct(string $cert, string $key, ?string $caCert = null, ?string $passphrase = null)
     {
         if (!is_file($cert)) {
-            throw new ConfigException(sprintf('mTLS client certificate not found: %s', $cert));
+            throw new ConfigException(\sprintf('mTLS client certificate not found: %s', $cert));
         }
 
         if (!is_file($key)) {
-            throw new ConfigException(sprintf('mTLS client key not found: %s', $key));
+            throw new ConfigException(\sprintf('mTLS client key not found: %s', $key));
         }
 
         if ($caCert !== null && !is_file($caCert)) {
-            throw new ConfigException(sprintf('mTLS CA certificate not found: %s', $caCert));
+            throw new ConfigException(\sprintf('mTLS CA certificate not found: %s', $caCert));
         }
 
         $this->cert = $cert;
@@ -44,6 +44,10 @@ class MtlsAuthenticator implements AuthenticatorInterface
         $this->passphrase = $passphrase;
     }
 
+    /**
+     * @param \CurlHandle|resource $ch
+     * @param string[] $headers
+     */
     public function apply($ch, array &$headers): void
     {
         curl_setopt($ch, CURLOPT_SSLCERT, $this->cert);

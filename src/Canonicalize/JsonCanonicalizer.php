@@ -205,7 +205,7 @@ class JsonCanonicalizer implements CanonicalizerInterface
     {
         $aUnits = $this->utf16CodeUnits($a);
         $bUnits = $this->utf16CodeUnits($b);
-        $length = min(count($aUnits), count($bUnits));
+        $length = min(\count($aUnits), \count($bUnits));
 
         for ($i = 0; $i < $length; $i++) {
             if ($aUnits[$i] !== $bUnits[$i]) {
@@ -213,7 +213,7 @@ class JsonCanonicalizer implements CanonicalizerInterface
             }
         }
 
-        return count($aUnits) <=> count($bUnits);
+        return \count($aUnits) <=> \count($bUnits);
     }
 
     /**

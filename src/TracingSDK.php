@@ -88,7 +88,7 @@ class TracingSDK
         $entries = [];
 
         foreach ($records as $record) {
-            if (!array_key_exists('rawData', $record) || !array_key_exists('signingTime', $record)) {
+            if (!\array_key_exists('rawData', $record) || !\array_key_exists('signingTime', $record)) {
                 throw new ConfigException('Each record requires "rawData" and "signingTime"');
             }
 
@@ -170,15 +170,15 @@ class TracingSDK
 
                 return new ApiTokenAuthenticator((string) $auth['token']);
             default:
-                throw new ConfigException(sprintf('Unsupported auth.type "%s"', $auth['type']));
+                throw new ConfigException(\sprintf('Unsupported auth.type "%s"', $auth['type']));
         }
     }
 
     private function assertRequiredKeys(array $config, array $keys): void
     {
         foreach ($keys as $key) {
-            if (!array_key_exists($key, $config) || $config[$key] === null || $config[$key] === '') {
-                throw new ConfigException(sprintf('Missing required config key "%s"', $key));
+            if (!\array_key_exists($key, $config) || $config[$key] === null || $config[$key] === '') {
+                throw new ConfigException(\sprintf('Missing required config key "%s"', $key));
             }
         }
     }
