@@ -8,7 +8,6 @@ interface HttpTransportInterface
 {
     /**
      * Send a single { hash, signingTime } record to the Indexer.
-     * Used when batching is disabled (batchSize 0 or 1).
      *
      * @param array{hash: string, signingTime: mixed} $record
      * @return array{statusCode: int, body: mixed, recordCount: int}

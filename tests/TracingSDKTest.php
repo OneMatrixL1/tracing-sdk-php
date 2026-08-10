@@ -17,92 +17,86 @@ class TracingSDKTest extends TestCase
         return new TracingSDK(array_merge([
             'endpoint' => 'https://indexer.example.com',
             'dataType' => 'json',
-            'batchSize' => 3,
-            'flushInterval' => 0,
-            'flushOnShutdown' => false,
             'auth' => ['type' => 'apiToken', 'token' => 'test-token'],
         ], $overrides));
     }
 
-    public function testFlushesOnceBatchSizeIsReached(): void
+    public function testHashReturnsHashAndSigningTime(): void
     {
-        $sdk = $this->makeSdk(['batchSize' => 2]);
+        $sdk = $this->makeSdk();
+
+        $entry = $sdk->hash('{"secret":"do-not-leak"}', 1234);
+
+        $this->assertSame(['hash', 'signingTime'], array_keys($entry));
+        $this->assertSame(1234, $entry['signingTime']);
+        $this->assertStringStartsWith('0x', $entry['hash']);
+    }
+
+    public function testHashDoesNotTouchTheNetwork(): void
+    {
+        $sdk = $this->makeSdk();
         $transport = new FakeTransport();
         $sdk->setTransportForTesting($transport);
 
-        $result = null;
-        $sdk->on('sent', function ($r) use (&$result) {
-            $result = $r;
-        });
+        $sdk->hash('{"a":1}', 1000);
 
-        $sdk->index('{"a":1}', 1000);
-        $this->assertSame(1, $sdk->pendingCount());
-        $this->assertNull($result);
-
-        $sdk->index('{"a":2}', 1001);
-
-        $this->assertSame(0, $sdk->pendingCount());
-        $this->assertCount(1, $transport->batchCalls);
-        $this->assertCount(2, $transport->batchCalls[0]);
         $this->assertSame([], $transport->singleCalls);
-        $this->assertNotNull($result);
+        $this->assertSame([], $transport->batchCalls);
     }
 
-    public function testFlushSendsRemainingRecordsImmediately(): void
+    public function testHashingSameContentTwiceProducesSameHash(): void
     {
-        $sdk = $this->makeSdk(['batchSize' => 10]);
-        $transport = new FakeTransport();
-        $sdk->setTransportForTesting($transport);
+        $sdk = $this->makeSdk();
 
-        $sdk->index('{"a":1}', 1000);
-        $this->assertSame(1, $sdk->pendingCount());
+        $a = $sdk->hash('{"a":1,"b":2}', 1);
+        $b = $sdk->hash('{"b":2,"a":1}', 2);
 
-        $sdk->flush();
-
-        $this->assertSame(0, $sdk->pendingCount());
-        $this->assertCount(1, $transport->batchCalls);
+        $this->assertSame($a['hash'], $b['hash']);
     }
 
-    public function testTransportErrorEmitsErrorEventInsteadOfThrowing(): void
-    {
-        $sdk = $this->makeSdk(['batchSize' => 10]);
-        $transport = new FakeTransport();
-        $transport->throw = true;
-        $sdk->setTransportForTesting($transport);
-
-        $caught = null;
-        $sdk->on('error', function ($e) use (&$caught) {
-            $caught = $e;
-        });
-
-        $sdk->index('{"a":1}', 1000);
-        $sdk->flush();
-
-        $this->assertInstanceOf(TransportException::class, $caught);
-    }
-
-    public function testBufferOnlyStoresHashAndSigningTimeNotRawData(): void
-    {
-        $sdk = $this->makeSdk(['batchSize' => 10]);
-        $transport = new FakeTransport();
-        $sdk->setTransportForTesting($transport);
-
-        $sdk->index('{"secret":"do-not-leak"}', 1234);
-        $sdk->flush();
-
-        $sentRecord = $transport->batchCalls[0][0];
-        $this->assertSame(['hash', 'signingTime'], array_keys($sentRecord));
-        $this->assertSame(1234, $sentRecord['signingTime']);
-        $this->assertStringStartsWith('0x', $sentRecord['hash']);
-    }
-
-    public function testMissingSigningTimeThrows(): void
+    public function testHashMissingSigningTimeThrows(): void
     {
         $sdk = $this->makeSdk();
 
         $this->expectException(ConfigException::class);
 
-        $sdk->index('{"a":1}');
+        $sdk->hash('{"a":1}', null);
+    }
+
+    public function testHashBatchHashesEachRecord(): void
+    {
+        $sdk = $this->makeSdk();
+
+        $entries = $sdk->hashBatch([
+            ['rawData' => '{"a":1}', 'signingTime' => 1],
+            ['rawData' => '{"a":2}', 'signingTime' => 2],
+        ]);
+
+        $this->assertCount(2, $entries);
+        $this->assertSame(1, $entries[0]['signingTime']);
+        $this->assertSame(2, $entries[1]['signingTime']);
+        $this->assertNotSame($entries[0]['hash'], $entries[1]['hash']);
+    }
+
+    public function testHashBatchRequiresRawDataAndSigningTimeKeys(): void
+    {
+        $sdk = $this->makeSdk();
+
+        $this->expectException(ConfigException::class);
+
+        $sdk->hashBatch([['rawData' => '{"a":1}']]);
+    }
+
+    public function testRawDataTypeHashesInputByteForByteWithoutCanonicalizing(): void
+    {
+        $sdk = $this->makeSdk(['dataType' => 'raw']);
+
+        // Deliberately not valid JSON/XML — 'raw' must not try to parse it.
+        $rawData = '  not json, not xml, just bytes  ';
+        $entry = $sdk->hash($rawData, 1000);
+
+        $expectedHash = (new Keccak256Hasher())->hash($rawData);
+        $this->assertSame($expectedHash, $entry['hash']);
     }
 
     public function testUnsupportedDataTypeThrows(): void
@@ -119,100 +113,62 @@ class TracingSDKTest extends TestCase
         $this->makeSdk(['auth' => ['type' => 'oauth2']]);
     }
 
-    public function testIndexingSameContentTwiceProducesSameHash(): void
+    public function testSendSendsSingleEntry(): void
     {
-        $sdk = $this->makeSdk(['batchSize' => 10]);
+        $sdk = $this->makeSdk();
         $transport = new FakeTransport();
         $sdk->setTransportForTesting($transport);
 
-        $sdk->index('{"a":1,"b":2}', 1);
-        $sdk->index('{"b":2,"a":1}', 2);
-        $sdk->flush();
+        $entry = $sdk->hash('{"a":1}', 1000);
+        $result = $sdk->send($entry);
 
-        $records = $transport->batchCalls[0];
-        $this->assertSame($records[0]['hash'], $records[1]['hash']);
-    }
-
-    public function testRawDataTypeHashesInputByteForByteWithoutCanonicalizing(): void
-    {
-        $sdk = $this->makeSdk(['dataType' => 'raw', 'batchSize' => 10]);
-        $transport = new FakeTransport();
-        $sdk->setTransportForTesting($transport);
-
-        // Deliberately not valid JSON/XML — 'raw' must not try to parse it.
-        $rawData = '  not json, not xml, just bytes  ';
-        $sdk->index($rawData, 1000);
-        $sdk->flush();
-
-        $expectedHash = (new Keccak256Hasher())->hash($rawData);
-        $this->assertSame($expectedHash, $transport->batchCalls[0][0]['hash']);
-    }
-
-    /**
-     * @dataProvider immediateBatchSizeProvider
-     */
-    public function testBatchSizeZeroOrOneSendsImmediatelyWithoutBuffering(int $batchSize): void
-    {
-        $sdk = $this->makeSdk(['batchSize' => $batchSize, 'flushInterval' => 0]);
-        $transport = new FakeTransport();
-        $sdk->setTransportForTesting($transport);
-
-        $sent = [];
-        $sdk->on('sent', function ($r) use (&$sent) {
-            $sent[] = $r;
-        });
-
-        $sdk->index('{"a":1}', 1000);
-
-        $this->assertSame(0, $sdk->pendingCount(), 'record should never sit in the buffer');
-        $this->assertCount(1, $transport->singleCalls);
-        $this->assertSame([], $transport->batchCalls);
-        $this->assertCount(1, $sent);
-
-        $sdk->index('{"a":2}', 1001);
-
-        $this->assertCount(2, $transport->singleCalls);
+        $this->assertSame(200, $result['statusCode']);
+        $this->assertSame([$entry], $transport->singleCalls);
         $this->assertSame([], $transport->batchCalls);
     }
 
-    public static function immediateBatchSizeProvider(): array
+    public function testSendBatchSendsAllEntriesTogether(): void
     {
-        return [
-            'batchSize 0' => [0],
-            'batchSize 1' => [1],
-        ];
-    }
-
-    public function testFlushIsNoopInImmediateMode(): void
-    {
-        $sdk = $this->makeSdk(['batchSize' => 1]);
+        $sdk = $this->makeSdk();
         $transport = new FakeTransport();
         $sdk->setTransportForTesting($transport);
 
-        $sdk->index('{"a":1}', 1000);
-        $this->assertCount(1, $transport->singleCalls);
+        $entries = $sdk->hashBatch([
+            ['rawData' => '{"a":1}', 'signingTime' => 1],
+            ['rawData' => '{"a":2}', 'signingTime' => 2],
+        ]);
+        $result = $sdk->sendBatch($entries);
 
-        // Nothing buffered, so an explicit flush() must not trigger another send.
-        $sdk->flush();
-
-        $this->assertCount(1, $transport->singleCalls);
-        $this->assertSame([], $transport->batchCalls);
+        $this->assertSame(2, $result['recordCount']);
+        $this->assertSame([$entries], $transport->batchCalls);
+        $this->assertSame([], $transport->singleCalls);
     }
 
-    public function testImmediateModeTransportErrorEmitsErrorEvent(): void
+    public function testSendThrowsOnTransportFailure(): void
     {
-        $sdk = $this->makeSdk(['batchSize' => 1]);
+        $sdk = $this->makeSdk();
         $transport = new FakeTransport();
         $transport->throw = true;
         $sdk->setTransportForTesting($transport);
 
-        $caught = null;
-        $sdk->on('error', function ($e) use (&$caught) {
-            $caught = $e;
-        });
+        $entry = $sdk->hash('{"a":1}', 1000);
 
-        $sdk->index('{"a":1}', 1000);
+        $this->expectException(TransportException::class);
 
-        $this->assertInstanceOf(TransportException::class, $caught);
+        $sdk->send($entry);
+    }
+
+    public function testSendBatchThrowsOnTransportFailure(): void
+    {
+        $sdk = $this->makeSdk();
+        $transport = new FakeTransport();
+        $transport->throw = true;
+        $sdk->setTransportForTesting($transport);
+
+        $entries = $sdk->hashBatch([['rawData' => '{"a":1}', 'signingTime' => 1]]);
+
+        $this->expectException(TransportException::class);
+
+        $sdk->sendBatch($entries);
     }
 }
