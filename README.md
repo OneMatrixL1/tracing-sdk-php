@@ -19,7 +19,7 @@ $sdk = new TracingSDK([
     'endpoint'      => 'https://indexer.example.com',
     'batchSize'     => 20,          // flush once the buffer reaches N records; 0 or 1 = send every record immediately, unbuffered
     'flushInterval' => 5000,        // flush after Δt ms even if batchSize hasn't been reached
-    'dataType'      => 'json',      // 'json' | 'xml'
+    'dataType'      => 'json',      // 'json' | 'xml' | 'raw'
     'auth'          => [
         'type'   => 'apiToken',     // 'mTLS' | 'basic' | 'apiToken'
         'token'  => 'your-api-token',
@@ -69,7 +69,7 @@ $sdk->flush(); // force an immediate send regardless of batchSize/flushInterval
 
 ## Design notes
 
-- **Canonicalization.** JSON is decoded, object keys are sorted recursively (array/list order is preserved), and re-encoded — so two JSON payloads that differ only in key order or whitespace hash identically. XML is canonicalized with `DOMDocument::C14N()` (W3C canonical XML), which normalizes attribute order and insignificant whitespace. External entity resolution is disabled for XML input to prevent XXE, since `rawData` is untrusted.
+- **Canonicalization.** JSON is decoded, object keys are sorted recursively (array/list order is preserved), and re-encoded — so two JSON payloads that differ only in key order or whitespace hash identically. XML is canonicalized with `DOMDocument::C14N()` (W3C canonical XML), which normalizes attribute order and insignificant whitespace. External entity resolution is disabled for XML input to prevent XXE, since `rawData` is untrusted. `dataType: 'raw'` skips canonicalization entirely — the input is hashed exactly as given, with no parsing; use it when the caller already guarantees a single deterministic representation.
 - **Hashing.** Keccak-256 (the original Keccak, as used by Ethereum — not FIPS-202 SHA3-256), via [`kornrunner/keccak`](https://github.com/kornrunner/php-keccak) rather than a hand-rolled implementation. Output is a `0x`-prefixed hex string.
 - **Buffer.** Only `{ hash, signingTime }` is retained in memory — the original `rawData` is discarded once hashed and never sent to, or stored for, the Indexer.
 - **Immediate vs. batched sending.** `batchSize` of `0` or `1` puts the SDK in immediate mode: nothing is buffered, `batchSize`/`flushInterval` don't apply, `flush()`/`tick()` are no-ops, and every record goes out on its own via `POST /api/anchors`. For `batchSize >= 2`, records buffer and go out together via `POST /api/anchors/batch` once `batchSize` or `flushInterval` is reached.

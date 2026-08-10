@@ -7,6 +7,7 @@ namespace Tracing\Sdk\Tests;
 use PHPUnit\Framework\TestCase;
 use Tracing\Sdk\Exception\ConfigException;
 use Tracing\Sdk\Exception\TransportException;
+use Tracing\Sdk\Hash\Keccak256Hasher;
 use Tracing\Sdk\TracingSDK;
 
 class TracingSDKTest extends TestCase
@@ -130,6 +131,21 @@ class TracingSDKTest extends TestCase
 
         $records = $transport->batchCalls[0];
         $this->assertSame($records[0]['hash'], $records[1]['hash']);
+    }
+
+    public function testRawDataTypeHashesInputByteForByteWithoutCanonicalizing(): void
+    {
+        $sdk = $this->makeSdk(['dataType' => 'raw', 'batchSize' => 10]);
+        $transport = new FakeTransport();
+        $sdk->setTransportForTesting($transport);
+
+        // Deliberately not valid JSON/XML — 'raw' must not try to parse it.
+        $rawData = '  not json, not xml, just bytes  ';
+        $sdk->index($rawData, 1000);
+        $sdk->flush();
+
+        $expectedHash = (new Keccak256Hasher())->hash($rawData);
+        $this->assertSame($expectedHash, $transport->batchCalls[0][0]['hash']);
     }
 
     /**

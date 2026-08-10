@@ -11,6 +11,7 @@ use Tracing\Sdk\Auth\MtlsAuthenticator;
 use Tracing\Sdk\Buffer\RecordBuffer;
 use Tracing\Sdk\Canonicalize\CanonicalizerInterface;
 use Tracing\Sdk\Canonicalize\JsonCanonicalizer;
+use Tracing\Sdk\Canonicalize\RawCanonicalizer;
 use Tracing\Sdk\Canonicalize\XmlCanonicalizer;
 use Tracing\Sdk\Event\EventEmitterTrait;
 use Tracing\Sdk\Exception\ConfigException;
@@ -35,6 +36,7 @@ class TracingSDK
 
     public const DATA_TYPE_JSON = 'json';
     public const DATA_TYPE_XML = 'xml';
+    public const DATA_TYPE_RAW = 'raw';
 
     /** @var int */
     private $batchSize;
@@ -249,8 +251,10 @@ class TracingSDK
                 return new JsonCanonicalizer();
             case self::DATA_TYPE_XML:
                 return new XmlCanonicalizer();
+            case self::DATA_TYPE_RAW:
+                return new RawCanonicalizer();
             default:
-                throw new ConfigException(sprintf('Unsupported dataType "%s", expected "json" or "xml"', $dataType));
+                throw new ConfigException(sprintf('Unsupported dataType "%s", expected "json", "xml", or "raw"', $dataType));
         }
     }
 
