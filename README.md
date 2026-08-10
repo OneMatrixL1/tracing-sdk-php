@@ -2,7 +2,7 @@
 
 PHP implementation of the Tracing SDK. Canonicalizes a record and hashes it with **Keccak-256** — that's the SDK's only automatic behavior, and it never touches the network. Sending the result to an Indexer service is an explicit, separate step the caller controls: send a single record or a batch, whenever and however often makes sense.
 
-Requires PHP 7.1+ or 8.x, plus the `json`, `dom`, `libxml`, and `curl` extensions.
+Requires PHP 7.1+ or 8.x, plus the `json`, `dom`, `libxml`, `curl`, and `mbstring` extensions.
 
 ## Install
 
@@ -65,7 +65,7 @@ $sdk->sendBatch($entries);                         // POST {endpoint}/api/anchor
 
 ## Design notes
 
-- **Canonicalization.** JSON is decoded, object keys are sorted recursively (array/list order is preserved), and re-encoded — so two JSON payloads that differ only in key order or whitespace hash identically. XML is canonicalized with `DOMDocument::C14N()` (W3C canonical XML), which normalizes attribute order and insignificant whitespace. External entity resolution is disabled for XML input to prevent XXE, since `rawData` is untrusted. `dataType: 'raw'` skips canonicalization entirely — the input is hashed exactly as given, with no parsing; use it when the caller already guarantees a single deterministic representation.
+- **Canonicalization.** JSON follows [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785) (the JSON Canonicalization Scheme / JCS): object member names are sorted by UTF-16 code unit value (not byte order — the two disagree for characters outside the Basic Multilingual Plane), numbers are formatted per the ECMAScript `Number::toString` algorithm (so `1`, `1.0`, and `1e0` all canonicalize identically, and `-0` normalizes to `0`), and a JSON object is never mistaken for a JSON array even when its keys happen to be sequential integers starting at 0. XML is canonicalized with `DOMDocument::C14N()` (W3C canonical XML), which normalizes attribute order and insignificant whitespace. External entity resolution is disabled for XML input to prevent XXE, since `rawData` is untrusted. `dataType: 'raw'` skips canonicalization entirely — the input is hashed exactly as given, with no parsing; use it when the caller already guarantees a single deterministic representation.
 - **Hashing.** Keccak-256 (the original Keccak, as used by Ethereum — not FIPS-202 SHA3-256), via [`kornrunner/keccak`](https://github.com/kornrunner/php-keccak) rather than a hand-rolled implementation. Output is a `0x`-prefixed hex string.
 
 ## Testing

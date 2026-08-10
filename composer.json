@@ -1,6 +1,6 @@
 {
     "name": "onematrix/tracing-sdk",
-    "description": "Tracing SDK: canonicalize, hash (Keccak-256), buffer and dispatch data-integrity records to an Indexer service over HTTP.",
+    "description": "Tracing SDK: canonicalize (RFC 8785 JSON Canonicalization Scheme, or W3C C14N for XML) and hash (Keccak-256) data-integrity records, then send them to an Indexer service over HTTP.",
     "type": "library",
     "license": "MIT",
     "author": {
@@ -13,6 +13,7 @@
         "ext-dom": "*",
         "ext-libxml": "*",
         "ext-curl": "*",
+        "ext-mbstring": "*",
         "kornrunner/keccak": "^1.1"
     },
     "require-dev": {

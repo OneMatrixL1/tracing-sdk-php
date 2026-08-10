@@ -1,11 +1,13 @@
 {
     "$schema": "Cross-language test vectors for the SDK's JSON canonicalizer.",
-    "description": "Rule: decode the JSON, recursively sort object keys by byte/codepoint order (SORT_STRING-equivalent; arrays/lists keep their original element order), then re-encode compactly — no inserted whitespace, forward slashes and non-ASCII characters left unescaped. Every language SDK's canonicalizer must produce exactly `expectedOutput` (byte-for-byte) for every string in `input`/`inputs`.",
+    "description": "The canonicalizer must implement RFC 8785 (JSON Canonicalization Scheme / JCS): https://www.rfc-editor.org/rfc/rfc8785. Decode the JSON, then re-serialize with object member names sorted by UTF-16 code unit value, numbers formatted per the ECMAScript `Number::toString` algorithm (so `1`, `1.0`, and `1e0` all collapse to the same output), and minimal string escaping. Every language SDK's canonicalizer must produce exactly `expectedOutput` (byte-for-byte) for every string in `input`/`inputs`.",
     "format": {
-        "objectKeyOrder": "sorted ascending by byte/codepoint value",
+        "objectKeyOrder": "sorted ascending by UTF-16 code UNIT value (RFC 8785 section 3.2.3) — NOT byte order and NOT Unicode code point order; these disagree for characters outside the Basic Multilingual Plane (see the `utf16-surrogate-sorts-before-bmp` case)",
         "arrayOrder": "preserved as-is",
+        "numberFormat": "ECMAScript Number::toString (RFC 8785 section 3.2.2.3) — shortest round-trippable decimal digits, plain/decimal/exponential form chosen by magnitude, integers and equal-valued floats collapse to the same output, -0 normalizes to 0",
+        "objectVsArray": "a JSON object and a JSON array are distinct types even when an object's keys happen to be sequential integers starting at 0 (see `object-with-sequential-numeric-keys-stays-an-object`) — do not use an array/list heuristic to decide the output shape",
         "whitespace": "none (compact)",
-        "escaping": "forward slashes and non-ASCII characters NOT escaped (equivalent to PHP's JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)"
+        "escaping": "forward slashes, non-ASCII characters, and U+2028/U+2029 line separators NOT escaped (equivalent to PHP's JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_LINE_TERMINATORS)"
     },
     "cases": [
         {
@@ -85,6 +87,66 @@
             "description": "Different content must produce different output (case b, must differ from case a's output)",
             "input": "{\"a\":2}",
             "expectedOutput": "{\"a\":2}"
+        },
+        {
+            "id": "object-with-sequential-numeric-keys-stays-an-object",
+            "description": "A JSON object whose keys happen to be sequential integers starting at 0 must remain an object in canonical output, not collapse into a JSON array",
+            "input": "{\"0\":\"x\",\"1\":\"y\"}",
+            "expectedOutput": "{\"0\":\"x\",\"1\":\"y\"}"
+        },
+        {
+            "id": "empty-object-preserved",
+            "description": "An empty object stays an object, distinct from an empty array",
+            "input": "{\"o\":{}}",
+            "expectedOutput": "{\"o\":{}}"
+        },
+        {
+            "id": "integer-and-equal-float-collapse-to-same-output",
+            "description": "A JSON integer literal and a JSON float literal for the same numeric value must canonicalize identically — JCS numbers are all IEEE 754 doubles, there is no separate integer type",
+            "inputs": ["{\"a\":1}", "{\"a\":1.0}", "{\"a\":1e0}"],
+            "expectedOutput": "{\"a\":1}"
+        },
+        {
+            "id": "negative-zero-normalizes-to-zero",
+            "description": "Negative zero normalizes to \"0\", matching JSON.stringify(-0) === \"0\"",
+            "input": "{\"a\":-0.0}",
+            "expectedOutput": "{\"a\":0}"
+        },
+        {
+            "id": "fraction-preserves-shortest-digits",
+            "description": "A fractional value is written with its shortest round-trippable decimal digits",
+            "input": "{\"a\":0.1}",
+            "expectedOutput": "{\"a\":0.1}"
+        },
+        {
+            "id": "large-integer-below-exponential-threshold",
+            "description": "1e20 is written out in full decimal digits — the exponential threshold is 1e21, not 1e20",
+            "input": "{\"a\":1.0e20}",
+            "expectedOutput": "{\"a\":100000000000000000000}"
+        },
+        {
+            "id": "large-integer-at-exponential-threshold",
+            "description": "1e21 is exactly at the threshold where ECMAScript Number::toString switches to exponential notation",
+            "input": "{\"a\":1.0e21}",
+            "expectedOutput": "{\"a\":1e+21}"
+        },
+        {
+            "id": "small-fraction-above-exponential-threshold",
+            "description": "1e-6 is still written in plain decimal form — the exponential threshold is 1e-7",
+            "input": "{\"a\":1.0e-6}",
+            "expectedOutput": "{\"a\":0.000001}"
+        },
+        {
+            "id": "small-fraction-at-exponential-threshold",
+            "description": "1e-7 is exactly at the threshold where ECMAScript Number::toString switches to exponential notation",
+            "input": "{\"a\":1.0e-7}",
+            "expectedOutput": "{\"a\":1e-7}"
+        },
+        {
+            "id": "utf16-surrogate-sorts-before-bmp",
+            "description": "Object keys sort by UTF-16 code unit value, not Unicode code point value: U+10000 (encoded in UTF-16 as the surrogate pair D800 DC00) sorts before U+FFFF (a single code unit), even though U+FFFF is numerically the smaller code point. Byte/code-point order would put U+FFFF first — the wrong answer for JCS.",
+            "input": "{\"\\uffff\":1,\"\\ud800\\udc00\":2}",
+            "expectedOutput": "{\"\ud800\udc00\":2,\"\uffff\":1}"
         },
         {
             "id": "invalid-json",
