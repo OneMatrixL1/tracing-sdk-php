@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-require __DIR__ . '/../../php/vendor/autoload.php';
+require __DIR__ . '/../../vendor/autoload.php';
 
 use Tracing\Sdk\TracingSDK;
 

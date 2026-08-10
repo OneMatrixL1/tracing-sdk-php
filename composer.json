@@ -1,8 +1,12 @@
 {
-    "name": "tracing/sdk",
+    "name": "onematrix/tracing-sdk",
     "description": "Tracing SDK: canonicalize, hash (Keccak-256), buffer and dispatch data-integrity records to an Indexer service over HTTP.",
     "type": "library",
     "license": "MIT",
+    "author": {
+        "name": "1Matrix",
+        "email": "anhtd@1matrix.com"
+    },
     "require": {
         "php": "^7.1 || ^8.0",
         "ext-json": "*",

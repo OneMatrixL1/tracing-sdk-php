@@ -13,7 +13,7 @@ final class FixtureLoader
 {
     public static function load(string $name): array
     {
-        $path = dirname(__DIR__, 2) . '/testdata/' . $name;
+        $path = dirname(__DIR__, 1) . '/testdata/' . $name;
         $contents = file_get_contents($path);
 
         if ($contents === false) {
