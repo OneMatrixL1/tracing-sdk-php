@@ -1,0 +1,30 @@
+{
+    "name": "tracing/sdk",
+    "description": "Tracing SDK: canonicalize, hash (Keccak-256), buffer and dispatch data-integrity records to an Indexer service over HTTP.",
+    "type": "library",
+    "license": "MIT",
+    "require": {
+        "php": "^7.1 || ^8.0",
+        "ext-json": "*",
+        "ext-dom": "*",
+        "ext-libxml": "*",
+        "ext-curl": "*",
+        "kornrunner/keccak": "^1.1"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "Tracing\\Sdk\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tracing\\Sdk\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

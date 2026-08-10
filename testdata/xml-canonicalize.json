@@ -1,0 +1,75 @@
+{
+    "$schema": "Cross-language test vectors for the SDK's XML canonicalizer.",
+    "description": "Rule: parse the XML and serialize it using W3C Canonical XML (C14N) — https://www.w3.org/TR/xml-c14n — which normalizes attribute order and insignificant whitespace between elements. Every language SDK's canonicalizer must produce exactly `expectedOutput` (byte-for-byte) for every string in `input`/`inputs`. External entity resolution MUST be disabled: parsing untrusted XML must never fetch or inline external/SYSTEM entities (XXE).",
+    "format": {
+        "algorithm": "W3C Canonical XML 1.0 (C14N), no comments, no exclusive namespace processing needed for these fixtures (none use namespaces)",
+        "attributeOrder": "normalized (C14N-defined order)",
+        "whitespace": "insignificant inter-element whitespace removed; empty elements serialized as an explicit open/close tag pair (e.g. `<root/>` becomes `<root></root>`)"
+    },
+    "cases": [
+        {
+            "id": "attribute-order-ignored",
+            "description": "Attribute order does not affect output",
+            "inputs": ["<root a=\"1\" b=\"2\"/>", "<root b=\"2\" a=\"1\"/>"],
+            "expectedOutput": "<root a=\"1\" b=\"2\"></root>"
+        },
+        {
+            "id": "whitespace-ignored",
+            "description": "Insignificant whitespace between elements does not affect output",
+            "inputs": ["<root><child>value</child></root>", "<root>\n  <child>value</child>\n</root>\n"],
+            "expectedOutput": "<root><child>value</child></root>"
+        },
+        {
+            "id": "different-content-a",
+            "description": "Different text content must produce different output (case a)",
+            "input": "<root>value1</root>",
+            "expectedOutput": "<root>value1</root>"
+        },
+        {
+            "id": "different-content-b",
+            "description": "Different text content must produce different output (case b, must differ from case a's output)",
+            "input": "<root>value2</root>",
+            "expectedOutput": "<root>value2</root>"
+        },
+        {
+            "id": "repeated-sibling-attribute-order-ignored",
+            "description": "Attribute order within repeated sibling elements does not affect output",
+            "inputs": [
+                "<root><item id=\"1\" type=\"x\"/><item id=\"2\" type=\"y\"/></root>",
+                "<root><item type=\"x\" id=\"1\"/><item type=\"y\" id=\"2\"/></root>"
+            ],
+            "expectedOutput": "<root><item id=\"1\" type=\"x\"></item><item id=\"2\" type=\"y\"></item></root>"
+        },
+        {
+            "id": "repeated-sibling-order-preserved-a",
+            "description": "Order of repeated sibling elements is preserved (case a)",
+            "input": "<root><item id=\"1\"/><item id=\"2\"/></root>",
+            "expectedOutput": "<root><item id=\"1\"></item><item id=\"2\"></item></root>"
+        },
+        {
+            "id": "repeated-sibling-order-preserved-b",
+            "description": "Order of repeated sibling elements is preserved (case b, must differ from case a's output)",
+            "input": "<root><item id=\"2\"/><item id=\"1\"/></root>",
+            "expectedOutput": "<root><item id=\"2\"></item><item id=\"1\"></item></root>"
+        },
+        {
+            "id": "empty-element-tag-forms-equivalent",
+            "description": "A self-closed empty tag and an explicit open/close pair are equivalent",
+            "inputs": ["<root></root>", "<root/>"],
+            "expectedOutput": "<root></root>"
+        },
+        {
+            "id": "invalid-xml",
+            "description": "Malformed XML (mismatched tags) must raise an error, not silently canonicalize",
+            "input": "<root><unclosed></root>",
+            "expectError": true
+        },
+        {
+            "id": "xxe-external-entity-must-not-resolve",
+            "description": "A DOCTYPE declaring a SYSTEM external entity must never have that entity fetched or inlined. Implementations may satisfy this either by rejecting the document outright (expectError) or by parsing it while leaving the entity unresolved — assert that, whichever happens, the output never contains forbiddenSubstring.",
+            "input": "<?xml version=\"1.0\"?><!DOCTYPE root [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><root>&xxe;</root>",
+            "allowError": true,
+            "forbiddenSubstring": "root:"
+        }
+    ]
+}
