@@ -1,6 +1,6 @@
 # Tracing SDK (PHP)
 
-PHP implementation of the Tracing SDK. Canonicalizes a record and hashes it with **Keccak-256** — that's the SDK's only automatic behavior, and it never touches the network. Sending the result to an Indexer service is an explicit, separate step the caller controls: send a single record or a batch, whenever and however often makes sense.
+PHP implementation of the Tracing SDK. Canonicalizes a record and hashes it with **Keccak-256** — that's the SDK's only automatic behavior, and it never touches the network. Sending the result to an Indexer service is an explicit, separate step the caller controls: send a single record or a batch, whenever and however often makes sense. Once a record is anchored, it can be looked up again by its hash.
 
 Requires PHP 7.1+ or 8.x, plus the `json`, `dom`, `libxml`, `curl`, and `mbstring` extensions.
 
@@ -34,9 +34,45 @@ $entries = $sdk->hashBatch([
     ['rawData' => $rawB, 'signingTime' => $signingTimeB],
 ]);
 $sdk->sendBatch($entries);                         // POST {endpoint}/api/anchors/batch
+
+// Look up an already-anchored record by its hash.
+$anchor = $sdk->queryByHash($entry['hash']);       // GET {endpoint}/api/anchors?hash=...
+echo $anchor['txHash'];
 ```
 
 `send()`/`sendBatch()` throw `Tracing\Sdk\Exception\TransportException` on a failed or rejected request — catch it, retry, queue, batch up before sending, or whatever else suits the caller. The SDK itself has no buffering, timers, or background sending; it's entirely up to you when hashing happens and when (or whether) the result is sent.
+
+### Querying an anchor by hash
+
+`queryByHash()` resolves a record's hash to the blockchain transaction that anchored it, via `GET {endpoint}/api/anchors?hash=<hash>`. The hash is URL-encoded for you, and the configured auth is applied exactly as it is for sending.
+
+```php
+use Tracing\Sdk\Exception\TransportException;
+
+try {
+    $anchor = $sdk->queryByHash('0x1c8a…');
+    // ['hash' => '0x1c8a…', 'txHash' => '0x9f42…']
+} catch (TransportException $e) {
+    // Not yet anchored, unknown hash, or the Indexer was unreachable.
+    echo $e->getMessage();
+}
+```
+
+Returns an array with exactly two keys:
+
+| Key | Description |
+| --- | --- |
+| `hash` | The record hash that was queried, as echoed back by the Indexer. |
+| `txHash` | Hash of the blockchain transaction the record was anchored in. |
+
+It throws `Tracing\Sdk\Exception\ConfigException` when `$hash` is empty, and `Tracing\Sdk\Exception\TransportException` when the request fails, the Indexer answers with a non-2xx status (including the `404` you get for a hash that was never anchored), or the response body isn't a `{ hash, txHash }` object. A hash that hasn't been anchored yet is therefore an exception, not a `null` return — so a lookup that must tolerate "not there yet" belongs in a `try`/`catch`.
+
+Because hashing is offline and deterministic, you can re-derive a hash from the original record and query it later without having stored the hash yourself:
+
+```php
+$hash = $sdk->hash($rawJsonOrXml, $signingTime)['hash'];
+$anchor = $sdk->queryByHash($hash);
+```
 
 ### Auth options
 
