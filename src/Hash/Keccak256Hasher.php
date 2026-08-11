@@ -10,7 +10,8 @@ use kornrunner\Keccak;
  * Keccak-256 (the original NIST submission, not FIPS-202 SHA3-256 —
  * this is the variant used by Ethereum/EVM-style integrity proofs).
  * Delegates to kornrunner/keccak, a pure-PHP, well-exercised implementation,
- * rather than hand-rolling the sponge construction.
+ * rather than hand-rolling the sponge construction. The library is vendored
+ * at src/php-keccak (MIT) and autoloaded from there instead of via Composer.
  */
 class Keccak256Hasher implements HasherInterface
 {

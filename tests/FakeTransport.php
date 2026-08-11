@@ -15,6 +15,12 @@ final class FakeTransport implements HttpTransportInterface
     /** @var array<int, array<int, array{hash: string, signingTime: mixed}>> */
     public $batchCalls = [];
 
+    /** @var array<int, string> */
+    public $queryCalls = [];
+
+    /** @var array{statusCode: int, body: mixed}|null */
+    public $queryResponse = null;
+
     /** @var bool */
     public $throw = false;
 
@@ -38,5 +44,20 @@ final class FakeTransport implements HttpTransportInterface
         $this->batchCalls[] = $records;
 
         return ['statusCode' => 200, 'body' => null, 'recordCount' => count($records)];
+    }
+
+    public function queryByHash(string $hash): array
+    {
+        if ($this->throw) {
+            throw new TransportException('boom');
+        }
+
+        $this->queryCalls[] = $hash;
+
+        if ($this->queryResponse !== null) {
+            return $this->queryResponse;
+        }
+
+        return ['statusCode' => 200, 'body' => ['hash' => $hash, 'txHash' => '0xabc']];
     }
 }

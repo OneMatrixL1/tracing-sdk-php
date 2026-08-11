@@ -13,6 +13,7 @@ use Tracing\Sdk\Canonicalize\JsonCanonicalizer;
 use Tracing\Sdk\Canonicalize\RawCanonicalizer;
 use Tracing\Sdk\Canonicalize\XmlCanonicalizer;
 use Tracing\Sdk\Exception\ConfigException;
+use Tracing\Sdk\Exception\TransportException;
 use Tracing\Sdk\Hash\HasherInterface;
 use Tracing\Sdk\Hash\Keccak256Hasher;
 use Tracing\Sdk\Transport\CurlHttpTransport;
@@ -123,6 +124,37 @@ class TracingSDK
     }
 
     /**
+     * Look up an anchored record by its hash via GET /api/anchors?hash=...
+     *
+     * @param string $hash
+     * @return array{hash: string, txHash: string}
+     * @throws \Tracing\Sdk\Exception\TransportException if the request fails,
+     *         the Indexer returns a non-2xx status, or the response body is
+     *         not the expected { hash, txHash } object
+     * @throws ConfigException if hash is empty
+     */
+    public function queryByHash(string $hash): array
+    {
+        if ($hash === '') {
+            throw new ConfigException('hash is required');
+        }
+
+        $response = $this->transport->queryByHash($hash);
+
+        if ($response['statusCode'] < 200 || $response['statusCode'] >= 300) {
+            throw new TransportException(\sprintf('Query by hash failed with HTTP %d', $response['statusCode']));
+        }
+
+        $body = $response['body'];
+
+        if (!\is_array($body) || !isset($body['hash'], $body['txHash'])) {
+            throw new TransportException('Unexpected response body for query by hash, expected { hash, txHash }');
+        }
+
+        return ['hash' => (string) $body['hash'], 'txHash' => (string) $body['txHash']];
+    }
+
+    /**
      * Swap the transport for a test double. Not part of the SDK's public
      * contract — for unit tests only, so specs can run without a live
      * Indexer endpoint.
@@ -142,7 +174,7 @@ class TracingSDK
             case self::DATA_TYPE_RAW:
                 return new RawCanonicalizer();
             default:
-                throw new ConfigException(sprintf('Unsupported dataType "%s", expected "json", "xml", or "raw"', $dataType));
+                throw new ConfigException(\sprintf('Unsupported dataType "%s", expected "json", "xml", or "raw"', $dataType));
         }
     }
 

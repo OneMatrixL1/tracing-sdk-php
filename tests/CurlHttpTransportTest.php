@@ -27,8 +27,15 @@ class CurlHttpTransportTest extends TestCase
         self::$baseUrl = 'http://127.0.0.1:' . $port;
         $router = __DIR__ . '/fixtures/echo-request-router.php';
 
+        // String command form: the array form requires PHP 7.4+, but the SDK
+        // supports PHP 7.1.
         self::$serverProcess = proc_open(
-            [PHP_BINARY, '-S', '127.0.0.1:' . $port, $router],
+            \sprintf(
+                '%s -S 127.0.0.1:%d %s',
+                escapeshellarg(PHP_BINARY),
+                $port,
+                escapeshellarg($router)
+            ),
             [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
             $pipes
         );

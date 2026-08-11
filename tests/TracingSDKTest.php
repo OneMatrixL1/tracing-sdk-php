@@ -171,4 +171,62 @@ class TracingSDKTest extends TestCase
 
         $sdk->sendBatch($entries);
     }
+
+    public function testQueryByHashReturnsHashAndTxHash(): void
+    {
+        $sdk = $this->makeSdk();
+        $transport = new FakeTransport();
+        $sdk->setTransportForTesting($transport);
+
+        $result = $sdk->queryByHash('0xdeadbeef');
+
+        $this->assertSame(['hash' => '0xdeadbeef', 'txHash' => '0xabc'], $result);
+        $this->assertSame(['0xdeadbeef'], $transport->queryCalls);
+    }
+
+    public function testQueryByHashRejectsEmptyHash(): void
+    {
+        $sdk = $this->makeSdk();
+        $sdk->setTransportForTesting(new FakeTransport());
+
+        $this->expectException(ConfigException::class);
+
+        $sdk->queryByHash('');
+    }
+
+    public function testQueryByHashThrowsOnNonSuccessStatusCode(): void
+    {
+        $sdk = $this->makeSdk();
+        $transport = new FakeTransport();
+        $transport->queryResponse = ['statusCode' => 404, 'body' => null];
+        $sdk->setTransportForTesting($transport);
+
+        $this->expectException(TransportException::class);
+
+        $sdk->queryByHash('0xdeadbeef');
+    }
+
+    public function testQueryByHashThrowsOnMalformedBody(): void
+    {
+        $sdk = $this->makeSdk();
+        $transport = new FakeTransport();
+        $transport->queryResponse = ['statusCode' => 200, 'body' => 'not-json-object'];
+        $sdk->setTransportForTesting($transport);
+
+        $this->expectException(TransportException::class);
+
+        $sdk->queryByHash('0xdeadbeef');
+    }
+
+    public function testQueryByHashThrowsOnTransportFailure(): void
+    {
+        $sdk = $this->makeSdk();
+        $transport = new FakeTransport();
+        $transport->throw = true;
+        $sdk->setTransportForTesting($transport);
+
+        $this->expectException(TransportException::class);
+
+        $sdk->queryByHash('0xdeadbeef');
+    }
 }

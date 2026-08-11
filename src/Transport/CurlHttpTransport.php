@@ -47,6 +47,17 @@ class CurlHttpTransport implements HttpTransportInterface
     }
 
     /**
+     * GET /api/anchors?hash=... — the Indexer responds with
+     * { "hash": "<hash hex>", "txHash": "<tx hash hex>" }.
+     */
+    public function queryByHash(string $hash): array
+    {
+        $url = $this->singleUrl . '?' . http_build_query(['hash' => $hash]);
+
+        return $this->execute($url, [CURLOPT_HTTPGET => true], ['Accept: application/json']);
+    }
+
+    /**
      * @param mixed $body
      */
     private function request(string $url, $body, int $recordCount): array
@@ -57,19 +68,33 @@ class CurlHttpTransport implements HttpTransportInterface
             throw new TransportException('Failed to encode request payload: ' . json_last_error_msg());
         }
 
+        $response = $this->execute(
+            $url,
+            [CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload],
+            ['Content-Type: application/json', 'Accept: application/json']
+        );
+        $response['recordCount'] = $recordCount;
+
+        return $response;
+    }
+
+    /**
+     * @param array<int, mixed> $methodOptions
+     * @param array<int, string> $headers
+     * @return array{statusCode: int, body: mixed}
+     */
+    private function execute(string $url, array $methodOptions, array $headers): array
+    {
         $ch = curl_init();
 
         if ($ch === false) {
             throw new TransportException('Failed to initialize cURL handle');
         }
 
-        $headers = ['Content-Type: application/json', 'Accept: application/json'];
         $this->authenticator->apply($ch, $headers);
 
-        curl_setopt_array($ch, [
+        curl_setopt_array($ch, $methodOptions + [
             CURLOPT_URL => $url,
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => $payload,
             CURLOPT_HTTPHEADER => $headers,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT_MS => $this->timeoutMs,
@@ -83,14 +108,14 @@ class CurlHttpTransport implements HttpTransportInterface
             $errno = curl_errno($ch);
             curl_close($ch);
 
-            throw new TransportException(sprintf('HTTP request to Indexer failed (errno %d): %s', $errno, $error));
+            throw new TransportException(\sprintf('HTTP request to Indexer failed (errno %d): %s', $errno, $error));
         }
 
         $statusCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
         if ($statusCode < 200 || $statusCode >= 300) {
-            throw new TransportException(sprintf('Indexer returned HTTP %d: %s', $statusCode, $responseBody));
+            throw new TransportException(\sprintf('Indexer returned HTTP %d: %s', $statusCode, $responseBody));
         }
 
         $decodedBody = json_decode($responseBody, true);
@@ -98,7 +123,6 @@ class CurlHttpTransport implements HttpTransportInterface
         return [
             'statusCode' => $statusCode,
             'body' => json_last_error() === JSON_ERROR_NONE ? $decodedBody : $responseBody,
-            'recordCount' => $recordCount,
         ];
     }
 }
