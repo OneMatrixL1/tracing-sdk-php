@@ -8,11 +8,11 @@ use Tracing\Sdk\TracingSDK;
 
 // Send a single record right away via POST /api/anchors instead of batching.
 $sdk = new TracingSDK([
-    'endpoint' => 'http://localhost:3000',
+    'endpoint' => 'http://localhost:3000', // replace with your provided indexer endpoint
     'dataType' => 'json',
     'auth'     => [
         'type'  => 'apiToken',
-        'token' => 'your-api-token',
+        'token' => 'your-api-token', // replace with your provided API token
     ],
 ]);
 

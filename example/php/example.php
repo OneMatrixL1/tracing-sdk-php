@@ -9,11 +9,11 @@ use Tracing\Sdk\TracingSDK;
 // The SDK canonicalizes + hashes (Keccak-256) and sends in one call — you
 // decide when and how (single record vs. batch).
 $sdk = new TracingSDK([
-    'endpoint' => 'http://localhost:3000',
+    'endpoint' => 'http://localhost:3000', // replace with your provided indexer endpoint
     'dataType' => 'json',
     'auth'     => [
         'type'  => 'apiToken',
-        'token' => 'your-api-token',
+        'token' => 'your-api-token', // replace with your provided API token
     ],
 ]);
 

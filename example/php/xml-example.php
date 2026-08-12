@@ -7,11 +7,11 @@ require __DIR__ . '/../../vendor/autoload.php';
 use Tracing\Sdk\TracingSDK;
 
 $sdk = new TracingSDK([
-    'endpoint' => 'http://localhost:3000',
+    'endpoint' => 'http://localhost:3000', // replace with your provided indexer endpoint
     'dataType' => 'xml',
     'auth'     => [
         'type'  => 'apiToken',
-        'token' => 'your-api-token',
+        'token' => 'your-api-token', // replace with your provided API token
     ],
 ]);
 
