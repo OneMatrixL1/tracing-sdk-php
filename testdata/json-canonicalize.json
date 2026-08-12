@@ -154,6 +154,30 @@
             "expectedOutput": "{\"outer\":{\"a\":1,\"b\":2}}"
         },
         {
+            "id": "deeply-nested-object-keys-sorted",
+            "description": "Keys are sorted at every level of a deeply nested object (5 levels), regardless of the order they appear in the input",
+            "inputs": [
+                "{\"b\":{\"d\":{\"f\":{\"h\":1,\"g\":2},\"e\":3},\"c\":4},\"a\":5}",
+                "{\"a\":5,\"b\":{\"c\":4,\"d\":{\"e\":3,\"f\":{\"g\":2,\"h\":1}}}}"
+            ],
+            "expectedOutput": "{\"a\":5,\"b\":{\"c\":4,\"d\":{\"e\":3,\"f\":{\"g\":2,\"h\":1}}}}"
+        },
+        {
+            "id": "deeply-nested-object-within-arrays",
+            "description": "Objects nested inside arrays inside nested objects are sorted at every level while the enclosing arrays keep their element order",
+            "inputs": [
+                "{\"root\":{\"z\":[{\"n\":{\"y\":1,\"x\":[{\"q\":2,\"p\":{\"s\":3,\"r\":4}}]}}],\"a\":{\"deep\":{\"deeper\":{\"deepest\":null}}}}}",
+                "{\"root\":{\"a\":{\"deep\":{\"deeper\":{\"deepest\":null}}},\"z\":[{\"n\":{\"x\":[{\"p\":{\"r\":4,\"s\":3},\"q\":2}],\"y\":1}}]}}"
+            ],
+            "expectedOutput": "{\"root\":{\"a\":{\"deep\":{\"deeper\":{\"deepest\":null}}},\"z\":[{\"n\":{\"x\":[{\"p\":{\"r\":4,\"s\":3},\"q\":2}],\"y\":1}}]}}"
+        },
+        {
+            "id": "deeply-nested-empty-object",
+            "description": "An empty object at the bottom of a nesting chain stays an empty object",
+            "input": "{\"a\":{\"b\":{\"c\":{}}}}",
+            "expectedOutput": "{\"a\":{\"b\":{\"c\":{}}}}"
+        },
+        {
             "id": "unicode-key-sorts-by-utf16-code-unit",
             "description": "A non-ASCII key (é, U+00E9) sorts after an ASCII key with a smaller code unit value (e, U+0065)",
             "input": "{\"é\":1,\"e\":2}",
