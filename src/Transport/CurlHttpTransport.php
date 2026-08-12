@@ -43,7 +43,7 @@ class CurlHttpTransport implements HttpTransportInterface
 
     public function sendBatch(array $records): array
     {
-        return $this->request($this->batchUrl, ['records' => array_values($records)], count($records));
+        return $this->request($this->batchUrl, array_values($records), count($records));
     }
 
     /**

@@ -71,7 +71,7 @@ class CurlHttpTransportTest extends TestCase
 
         $this->assertSame('/api/anchors/batch', $result['body']['path']);
         $this->assertSame('POST', $result['body']['method']);
-        $this->assertSame(['records' => $records], $result['body']['body']);
+        $this->assertSame($records, $result['body']['body']);
     }
 
     private static function findFreePort(): int

@@ -16,6 +16,6 @@ class ApiTokenAuthenticator implements AuthenticatorInterface
 
     public function apply($ch, array &$headers): void
     {
-        $headers[] = "Authorization: Bearer {$this->token}";
+        $headers[] = "X-API-Key: {$this->token}";
     }
 }
