@@ -20,21 +20,23 @@ function orderXml(int $orderId, int $amount): string
     return sprintf('<order><orderId>%d</orderId><amount>%d</amount></order>', $orderId, $amount);
 }
 
-// Hash a batch of records, then send them together via POST /api/anchors/batch.
-$entries = $sdk->hashBatch([
-    ['rawData' => orderXml(1, 10), 'signingTime' => time()],
-    ['rawData' => orderXml(2, 20), 'signingTime' => time()],
-    ['rawData' => orderXml(3, 30), 'signingTime' => time()],
-]);
-
+// Send a batch of records together via POST /api/anchors/batch.
 try {
-    $result = $sdk->sendBatch($entries);
-    printf(
-        "[sent] HTTP %d, %d record(s)%s\n",
-        $result['statusCode'],
-        $result['recordCount'],
-        is_array($result['body']) ? ' -> ' . json_encode($result['body']) : ''
-    );
+    $results = $sdk->sendBatch([
+        ['rawData' => orderXml(1, 10), 'signingTime' => time()],
+        ['rawData' => orderXml(2, 20), 'signingTime' => time()],
+        ['rawData' => orderXml(3, 30), 'signingTime' => time()],
+    ]);
+
+    foreach ($results as $result) {
+        printf(
+            "[sent] %s -> HTTP %d, %d record(s)%s\n",
+            $result['hash'],
+            $result['response']['statusCode'],
+            $result['response']['recordCount'],
+            is_array($result['response']['body']) ? ' -> ' . json_encode($result['response']['body']) : ''
+        );
+    }
 } catch (\Throwable $e) {
     fwrite(STDERR, '[error] ' . $e->getMessage() . "\n");
 }

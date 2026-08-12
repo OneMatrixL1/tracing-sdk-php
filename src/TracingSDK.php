@@ -20,11 +20,8 @@ use Tracing\Sdk\Transport\CurlHttpTransport;
 use Tracing\Sdk\Transport\HttpTransportInterface;
 
 /**
- * Canonicalizes and hashes (Keccak-256) records — that's the SDK's only
- * automatic behavior, and it never touches the network. Sending the result
- * to the Indexer is an explicit, separate step the caller controls: call
- * send() for a single record or sendBatch() for many, whenever and however
- * often makes sense for the caller (immediately, batched, on a timer, ...).
+ * Canonicalizes a record, hashes it with Keccak-256, and sends the resulting
+ * { hash, signingTime } entry to the Indexer.
  */
 class TracingSDK
 {
@@ -56,15 +53,62 @@ class TracingSDK
     }
 
     /**
-     * Canonicalize and hash one record.
+     * Canonicalize, hash, and send one record via POST /api/anchors.
      *
      * @param string $rawData
      * @param mixed $signingTime
-     * @return array{hash: string, signingTime: mixed}
+     * @return array{hash: string, response: array{statusCode: int, body: mixed, recordCount: int}}
      * @throws \Tracing\Sdk\Exception\CanonicalizationException
      * @throws ConfigException if signingTime is missing
+     * @throws TransportException
      */
-    public function hash(string $rawData, $signingTime): array
+    public function send(string $rawData, $signingTime): array
+    {
+        $entry = $this->hash($rawData, $signingTime);
+
+        return [
+            'hash' => $entry['hash'],
+            'response' => $this->transport->sendSingle($entry),
+        ];
+    }
+
+    /**
+     * Canonicalize, hash, and send multiple records via POST /api/anchors/batch.
+     *
+     * @param array<int, array{rawData: string, signingTime: mixed}> $records
+     * @return array<int, array{hash: string, response: array{statusCode: int, body: mixed, recordCount: int}}>
+     * @throws \Tracing\Sdk\Exception\CanonicalizationException
+     * @throws ConfigException if a record is missing "rawData" or "signingTime"
+     * @throws TransportException
+     */
+    public function sendBatch(array $records): array
+    {
+        $entries = [];
+
+        foreach ($records as $record) {
+            if (!\array_key_exists('rawData', $record) || !\array_key_exists('signingTime', $record)) {
+                throw new ConfigException('Each record requires "rawData" and "signingTime"');
+            }
+
+            $entries[] = $this->hash((string) $record['rawData'], $record['signingTime']);
+        }
+
+        $response = $this->transport->sendBatch($entries);
+        $results = [];
+
+        foreach ($entries as $entry) {
+            $results[] = ['hash' => $entry['hash'], 'response' => $response];
+        }
+
+        return $results;
+    }
+
+    /**
+     * @param string $rawData
+     * @param mixed $signingTime
+     * @return array{hash: string, signingTime: mixed}
+     */
+    private function hash(string $rawData, $signingTime): array
     {
         if ($signingTime === null) {
             throw new ConfigException('signingTime is required');
@@ -79,56 +123,11 @@ class TracingSDK
     }
 
     /**
-     * Canonicalize and hash multiple records.
-     *
-     * @param array<int, array{rawData: string, signingTime: mixed}> $records
-     * @return array<int, array{hash: string, signingTime: mixed}>
-     */
-    public function hashBatch(array $records): array
-    {
-        $entries = [];
-
-        foreach ($records as $record) {
-            if (!\array_key_exists('rawData', $record) || !\array_key_exists('signingTime', $record)) {
-                throw new ConfigException('Each record requires "rawData" and "signingTime"');
-            }
-
-            $entries[] = $this->hash((string) $record['rawData'], $record['signingTime']);
-        }
-
-        return $entries;
-    }
-
-    /**
-     * Send a single { hash, signingTime } entry via POST /api/anchors.
-     *
-     * @param array{hash: string, signingTime: mixed} $entry
-     * @return array{statusCode: int, body: mixed, recordCount: int}
-     * @throws \Tracing\Sdk\Exception\TransportException
-     */
-    public function send(array $entry): array
-    {
-        return $this->transport->sendSingle($entry);
-    }
-
-    /**
-     * Send multiple { hash, signingTime } entries via POST /api/anchors/batch.
-     *
-     * @param array<int, array{hash: string, signingTime: mixed}> $entries
-     * @return array{statusCode: int, body: mixed, recordCount: int}
-     * @throws \Tracing\Sdk\Exception\TransportException
-     */
-    public function sendBatch(array $entries): array
-    {
-        return $this->transport->sendBatch($entries);
-    }
-
-    /**
      * Look up an anchored record by its hash via GET /api/anchors?hash=...
      *
      * @param string $hash
      * @return array{hash: string, txHash: string}
-     * @throws \Tracing\Sdk\Exception\TransportException if the request fails,
+     * @throws TransportException if the request fails,
      *         the Indexer returns a non-2xx status, or the response body is
      *         not the expected { hash, txHash } object
      * @throws ConfigException if hash is empty

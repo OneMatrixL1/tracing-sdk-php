@@ -6,8 +6,7 @@ require __DIR__ . '/../../vendor/autoload.php';
 
 use Tracing\Sdk\TracingSDK;
 
-// Hashing and sending are decoupled — nothing stops you from hashing one
-// record and sending it right away via POST /api/anchors instead of batching.
+// Send a single record right away via POST /api/anchors instead of batching.
 $sdk = new TracingSDK([
     'endpoint' => 'http://localhost:3000',
     'dataType' => 'json',
@@ -17,11 +16,14 @@ $sdk = new TracingSDK([
     ],
 ]);
 
-$entry = $sdk->hash(json_encode(['orderId' => 1]), time());
-
 try {
-    $result = $sdk->send($entry);
-    printf("[sent] HTTP %d%s\n", $result['statusCode'], is_array($result['body']) ? ' -> ' . json_encode($result['body']) : '');
+    $result = $sdk->send(json_encode(['orderId' => 1]), time());
+    printf(
+        "[sent] %s -> HTTP %d%s\n",
+        $result['hash'],
+        $result['response']['statusCode'],
+        is_array($result['response']['body']) ? ' -> ' . json_encode($result['response']['body']) : ''
+    );
 } catch (\Throwable $e) {
     fwrite(STDERR, '[error] ' . $e->getMessage() . "\n");
 }

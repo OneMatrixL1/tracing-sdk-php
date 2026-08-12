@@ -6,8 +6,8 @@ require __DIR__ . '/../../vendor/autoload.php';
 
 use Tracing\Sdk\TracingSDK;
 
-// The SDK only canonicalizes + hashes (Keccak-256). Sending is an explicit,
-// separate step — you decide when and how (single record vs. batch).
+// The SDK canonicalizes + hashes (Keccak-256) and sends in one call — you
+// decide when and how (single record vs. batch).
 $sdk = new TracingSDK([
     'endpoint' => 'http://localhost:3000',
     'dataType' => 'json',
@@ -17,21 +17,23 @@ $sdk = new TracingSDK([
     ],
 ]);
 
-// Hash a batch of records, then send them together via POST /api/anchors/batch.
-$entries = $sdk->hashBatch([
-    ['rawData' => json_encode(['orderId' => 1, 'amount' => 10]), 'signingTime' => time()],
-    ['rawData' => json_encode(['orderId' => 2, 'amount' => 20]), 'signingTime' => time()],
-    ['rawData' => json_encode(['orderId' => 3, 'amount' => 30]), 'signingTime' => time()],
-]);
-
+// Send a batch of records together via POST /api/anchors/batch.
 try {
-    $result = $sdk->sendBatch($entries);
-    printf(
-        "[sent] HTTP %d, %d record(s)%s\n",
-        $result['statusCode'],
-        $result['recordCount'],
-        is_array($result['body']) ? ' -> ' . json_encode($result['body']) : ''
-    );
+    $results = $sdk->sendBatch([
+        ['rawData' => json_encode(['orderId' => 1, 'amount' => 10]), 'signingTime' => time()],
+        ['rawData' => json_encode(['orderId' => 2, 'amount' => 20]), 'signingTime' => time()],
+        ['rawData' => json_encode(['orderId' => 3, 'amount' => 30]), 'signingTime' => time()],
+    ]);
+
+    foreach ($results as $result) {
+        printf(
+            "[sent] %s -> HTTP %d, %d record(s)%s\n",
+            $result['hash'],
+            $result['response']['statusCode'],
+            $result['response']['recordCount'],
+            is_array($result['response']['body']) ? ' -> ' . json_encode($result['response']['body']) : ''
+        );
+    }
 } catch (\Throwable $e) {
     fwrite(STDERR, '[error] ' . $e->getMessage() . "\n");
 }

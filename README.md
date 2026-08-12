@@ -1,6 +1,6 @@
 # Tracing SDK (PHP)
 
-PHP implementation of the Tracing SDK. Canonicalizes a record and hashes it with **Keccak-256** — that's the SDK's only automatic behavior, and it never touches the network. Sending the result to an Indexer service is an explicit, separate step the caller controls: send a single record or a batch, whenever and however often makes sense. Once a record is anchored, it can be looked up again by its hash.
+PHP implementation of the Tracing SDK. Canonicalizes a record, hashes it with **Keccak-256**, and sends the hash to an Indexer service. Canonicalization and hashing happen inside `send()`/`sendBatch()`, which return the hash alongside the Indexer's response. The SDK has no buffering, timers, or background sending — you decide when to send, one record at a time or a batch. Once a record is anchored, it can be looked up again by its hash.
 
 Requires PHP 7.1+ or 8.x, plus the `json`, `dom`, `libxml`, `curl`, and `mbstring` extensions.
 
@@ -24,23 +24,25 @@ $sdk = new TracingSDK([
     ],
 ]);
 
-// Hash one record, then decide when to send it.
-$entry = $sdk->hash($rawJsonOrXml, $signingTime); // { hash, signingTime }
-$sdk->send($entry);                                // POST {endpoint}/api/anchors
+// Send one record: canonicalize + hash + POST {endpoint}/api/anchors
+$result = $sdk->send($rawJsonOrXml, $signingTime);
+// ['hash' => '0x1c8a…', 'response' => ['statusCode' => 200, 'body' => …, 'recordCount' => 1]]
 
-// Or hash several and send them together.
-$entries = $sdk->hashBatch([
+// Or send several together: POST {endpoint}/api/anchors/batch
+$results = $sdk->sendBatch([
     ['rawData' => $rawA, 'signingTime' => $signingTimeA],
     ['rawData' => $rawB, 'signingTime' => $signingTimeB],
 ]);
-$sdk->sendBatch($entries);                         // POST {endpoint}/api/anchors/batch
+// [['hash' => '0xaaa…', 'response' => […]], ['hash' => '0xbbb…', 'response' => […]]]
 
 // Look up an already-anchored record by its hash.
-$anchor = $sdk->queryByHash($entry['hash']);       // GET {endpoint}/api/anchors?hash=...
+$anchor = $sdk->queryByHash($result['hash']);      // GET {endpoint}/api/anchors?hash=...
 echo $anchor['txHash'];
 ```
 
-`send()`/`sendBatch()` throw `Tracing\Sdk\Exception\TransportException` on a failed or rejected request — catch it, retry, queue, batch up before sending, or whatever else suits the caller. The SDK itself has no buffering, timers, or background sending; it's entirely up to you when hashing happens and when (or whether) the result is sent.
+`send()` returns `['hash' => …, 'response' => ['statusCode', 'body', 'recordCount']]`. `sendBatch()` sends every record in a single request and returns one such entry per input record, in input order — each carries its own `hash` and shares the one `response` of that request.
+
+`send()`/`sendBatch()` throw `Tracing\Sdk\Exception\TransportException` on a failed or rejected request — catch it, retry, queue, batch up before sending, or whatever else suits the caller. They throw `Tracing\Sdk\Exception\ConfigException` when `signingTime` is missing or a batch record lacks `rawData`/`signingTime`, and `Tracing\Sdk\Exception\CanonicalizationException` when `rawData` can't be canonicalized for the configured `dataType`; both are raised before anything is sent.
 
 ### Querying an anchor by hash
 
@@ -67,12 +69,7 @@ Returns an array with exactly two keys:
 
 It throws `Tracing\Sdk\Exception\ConfigException` when `$hash` is empty, and `Tracing\Sdk\Exception\TransportException` when the request fails, the Indexer answers with a non-2xx status (including the `404` you get for a hash that was never anchored), or the response body isn't a `{ hash, txHash }` object. A hash that hasn't been anchored yet is therefore an exception, not a `null` return — so a lookup that must tolerate "not there yet" belongs in a `try`/`catch`.
 
-Because hashing is offline and deterministic, you can re-derive a hash from the original record and query it later without having stored the hash yourself:
-
-```php
-$hash = $sdk->hash($rawJsonOrXml, $signingTime)['hash'];
-$anchor = $sdk->queryByHash($hash);
-```
+Hashing is deterministic, so the same record always yields the same hash — keep the `hash` returned by `send()`/`sendBatch()` and query it whenever you need to.
 
 ### Auth options
 
