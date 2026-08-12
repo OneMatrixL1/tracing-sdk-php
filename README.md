@@ -44,6 +44,23 @@ echo $anchor['txHash'];
 
 `send()`/`sendBatch()` throw `Tracing\Sdk\Exception\TransportException` on a failed or rejected request — catch it, retry, queue, batch up before sending, or whatever else suits the caller. They throw `Tracing\Sdk\Exception\ConfigException` when `signingTime` is missing or a batch record lacks `rawData`/`signingTime`, and `Tracing\Sdk\Exception\CanonicalizationException` when `rawData` can't be canonicalized for the configured `dataType`; both are raised before anything is sent.
 
+### Runnable examples
+
+`example/php/` holds complete, runnable scripts — the quickest way to see the whole flow end to end:
+
+| File | What it shows |
+| --- | --- |
+| [`example/php/single-send-example.php`](example/php/single-send-example.php) | Sending one JSON record with `send()` |
+| [`example/php/example.php`](example/php/example.php) | Sending several JSON records in one request with `sendBatch()` |
+| [`example/php/xml-example.php`](example/php/xml-example.php) | The same batch flow with `dataType: 'xml'` |
+
+Each script points at `http://localhost:3000` with a placeholder API token — edit the `endpoint` and `auth` values at the top to match your Indexer, then run:
+
+```bash
+composer install
+php example/php/single-send-example.php
+```
+
 ### Querying an anchor by hash
 
 `queryByHash()` resolves a record's hash to the blockchain transaction that anchored it, via `GET {endpoint}/api/anchors?hash=<hash>`. The hash is URL-encoded for you, and the configured auth is applied exactly as it is for sending.
