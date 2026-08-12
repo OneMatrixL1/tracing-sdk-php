@@ -1,3 +1,20 @@
 /vendor/
 composer.lock
 .phpunit.result.cache
+
+# IDE / editor
+.vscode/
+.idea/
+*.iml
+.fleet/
+nbproject/
+.project
+.buildpath
+.settings/
+*.sublime-project
+*.sublime-workspace
+.history/
+
+# OS
+.DS_Store
+Thumbs.db
