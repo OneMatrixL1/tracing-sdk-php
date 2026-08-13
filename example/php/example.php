@@ -11,7 +11,8 @@ use Tracing\Sdk\TracingSDK;
 // decide when and how (single record vs. batch).
 $sdk = new TracingSDK([
     'endpoint' => 'http://localhost:3000', // replace with your provided indexer endpoint
-    'options'  => SendOptions::dataType('json'), // default for every send/sendBatch
+    'options'  => new SendOptions('json', 5000), // dataType + request timeout in ms,
+                                                 // defaults for every send/sendBatch
     'auth'     => [
         'type'  => 'apiToken',
         'token' => 'your-api-token', // replace with your provided API token
@@ -24,7 +25,7 @@ try {
         ['rawData' => json_encode(['orderId' => 1, 'amount' => 10]), 'signingTime' => time()],
         ['rawData' => json_encode(['orderId' => 2, 'amount' => 20]), 'signingTime' => time()],
         ['rawData' => json_encode(['orderId' => 3, 'amount' => 30]), 'signingTime' => time()],
-    ]);
+    ], SendOptions::timeoutMs(30000)); // a batch gets more headroom than the 5s default
 
     foreach ($results as $result) {
         printf(

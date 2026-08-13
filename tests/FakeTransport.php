@@ -24,35 +24,41 @@ final class FakeTransport implements HttpTransportInterface
     /** @var bool */
     public $throw = false;
 
-    public function sendSingle(array $record): array
+    /** Timeout passed to the most recent call, in call order. @var array<int, int|null> */
+    public $timeoutCalls = [];
+
+    public function sendSingle(array $record, ?int $timeoutMs = null): array
     {
         if ($this->throw) {
             throw new TransportException('boom');
         }
 
         $this->singleCalls[] = $record;
+        $this->timeoutCalls[] = $timeoutMs;
 
         return ['statusCode' => 200, 'body' => null, 'recordCount' => 1];
     }
 
-    public function sendBatch(array $records): array
+    public function sendBatch(array $records, ?int $timeoutMs = null): array
     {
         if ($this->throw) {
             throw new TransportException('boom');
         }
 
         $this->batchCalls[] = $records;
+        $this->timeoutCalls[] = $timeoutMs;
 
         return ['statusCode' => 200, 'body' => null, 'recordCount' => count($records)];
     }
 
-    public function queryByHash(string $hash): array
+    public function queryByHash(string $hash, ?int $timeoutMs = null): array
     {
         if ($this->throw) {
             throw new TransportException('boom');
         }
 
         $this->queryCalls[] = $hash;
+        $this->timeoutCalls[] = $timeoutMs;
 
         if ($this->queryResponse !== null) {
             return $this->queryResponse;

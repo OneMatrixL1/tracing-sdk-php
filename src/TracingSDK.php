@@ -64,7 +64,8 @@ class TracingSDK
         $this->hasher = new Keccak256Hasher();
         $this->transport = new CurlHttpTransport(
             (string) $config['endpoint'],
-            $this->createAuthenticator($config['auth'])
+            $this->createAuthenticator($config['auth']),
+            $this->defaultOptions->getTimeoutMs() ?? CurlHttpTransport::DEFAULT_TIMEOUT_MS
         );
     }
 
@@ -92,7 +93,7 @@ class TracingSDK
 
         return [
             'hash' => $entry['hash'],
-            'response' => $this->transport->sendSingle($entry),
+            'response' => $this->transport->sendSingle($entry, $this->timeoutMsFor($options)),
         ];
     }
 
@@ -122,7 +123,7 @@ class TracingSDK
             ];
         }
 
-        $response = $this->transport->sendBatch($entries);
+        $response = $this->transport->sendBatch($entries, $this->timeoutMsFor($options));
         $results = [];
 
         foreach ($entries as $entry) {
@@ -151,19 +152,20 @@ class TracingSDK
      * Look up an anchored record by its hash via GET /api/anchors?hash=...
      *
      * @param string $hash
+     * @param SendOptions|null $options per-call overrides; falls back to config
      * @return array{hash: string, txHashes: array<int, string>}
      * @throws TransportException if the request fails,
      *         the Indexer returns a non-2xx status, or the response body is
      *         not the expected { hash, txHashes } object
      * @throws ConfigException if hash is empty
      */
-    public function queryByHash(string $hash): array
+    public function queryByHash(string $hash, ?SendOptions $options = null): array
     {
         if ($hash === '') {
             throw new ConfigException('hash is required');
         }
 
-        $response = $this->transport->queryByHash($hash);
+        $response = $this->transport->queryByHash($hash, $this->timeoutMsFor($options));
 
         if ($response['statusCode'] < 200 || $response['statusCode'] >= 300) {
             throw new TransportException(\sprintf('Query by hash failed with HTTP %d', $response['statusCode']));
@@ -192,6 +194,16 @@ class TracingSDK
     public function setTransportForTesting(HttpTransportInterface $transport): void
     {
         $this->transport = $transport;
+    }
+
+    /**
+     * Resolve the request timeout for this call: the per-call timeoutMs when
+     * one was given, otherwise null so the transport keeps the config default
+     * it was constructed with.
+     */
+    private function timeoutMsFor(?SendOptions $options): ?int
+    {
+        return $options !== null ? $options->getTimeoutMs() : null;
     }
 
     /**

@@ -194,6 +194,49 @@ class TracingSDKTest extends TestCase
         $this->assertSame($withoutOptions['hash'], $withEmptyOptions['hash']);
     }
 
+    public function testSendOptionsTimeoutIsPassedToTheTransport(): void
+    {
+        $sdk = $this->makeSdk();
+        $transport = new FakeTransport();
+        $sdk->setTransportForTesting($transport);
+
+        $sdk->send('{"a":1}', 1, SendOptions::dataType('json')->withTimeoutMs(2500));
+        $sdk->sendBatch([['rawData' => '{"a":1}', 'signingTime' => 1]], SendOptions::timeoutMs(500));
+        $sdk->queryByHash('0xdeadbeef', SendOptions::timeoutMs(750));
+
+        $this->assertSame([2500, 500, 750], $transport->timeoutCalls);
+    }
+
+    public function testCallsWithoutATimeoutLeaveTheTransportDefaultInPlace(): void
+    {
+        $sdk = $this->makeSdk(['options' => new SendOptions('json', 4000)]);
+        $transport = new FakeTransport();
+        $sdk->setTransportForTesting($transport);
+
+        $sdk->send('{"a":1}', 1);
+        $sdk->send('{"a":1}', 1, SendOptions::dataType('json'));
+
+        $this->assertSame([null, null], $transport->timeoutCalls);
+    }
+
+    /**
+     * @dataProvider invalidTimeoutProvider
+     */
+    public function testNonPositiveTimeoutThrows(int $timeoutMs): void
+    {
+        $this->expectException(ConfigException::class);
+
+        new SendOptions('json', $timeoutMs);
+    }
+
+    /**
+     * @return array<string, array{int}>
+     */
+    public static function invalidTimeoutProvider(): array
+    {
+        return ['zero' => [0], 'negative' => [-1]];
+    }
+
     public function testDataTypeMayBeOmittedFromConfigWhenEveryCallSuppliesIt(): void
     {
         $sdk = new TracingSDK([

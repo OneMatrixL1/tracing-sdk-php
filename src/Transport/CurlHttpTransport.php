@@ -15,6 +15,9 @@ use Tracing\Sdk\Exception\TransportException;
  */
 class CurlHttpTransport implements HttpTransportInterface
 {
+    /** Timeout applied when neither the config nor the call supplies one. */
+    public const DEFAULT_TIMEOUT_MS = 10000;
+
     /** @var string */
     private $singleUrl;
 
@@ -27,7 +30,7 @@ class CurlHttpTransport implements HttpTransportInterface
     /** @var int */
     private $timeoutMs;
 
-    public function __construct(string $baseEndpoint, AuthenticatorInterface $authenticator, int $timeoutMs = 10000)
+    public function __construct(string $baseEndpoint, AuthenticatorInterface $authenticator, int $timeoutMs = self::DEFAULT_TIMEOUT_MS)
     {
         $base = rtrim($baseEndpoint, '/');
         $this->singleUrl = $base . '/api/anchors';
@@ -36,31 +39,31 @@ class CurlHttpTransport implements HttpTransportInterface
         $this->timeoutMs = $timeoutMs;
     }
 
-    public function sendSingle(array $record): array
+    public function sendSingle(array $record, ?int $timeoutMs = null): array
     {
-        return $this->request($this->singleUrl, $record, 1);
+        return $this->request($this->singleUrl, $record, 1, $timeoutMs);
     }
 
-    public function sendBatch(array $records): array
+    public function sendBatch(array $records, ?int $timeoutMs = null): array
     {
-        return $this->request($this->batchUrl, array_values($records), count($records));
+        return $this->request($this->batchUrl, array_values($records), count($records), $timeoutMs);
     }
 
     /**
      * GET /api/anchors?hash=... — the Indexer responds with
      * { "hash": "<hash hex>", "txHashes": ["<tx hash hex>", ...] }.
      */
-    public function queryByHash(string $hash): array
+    public function queryByHash(string $hash, ?int $timeoutMs = null): array
     {
         $url = $this->singleUrl . '?' . http_build_query(['hash' => $hash]);
 
-        return $this->execute($url, [CURLOPT_HTTPGET => true], ['Accept: application/json']);
+        return $this->execute($url, [CURLOPT_HTTPGET => true], ['Accept: application/json'], $timeoutMs);
     }
 
     /**
      * @param mixed $body
      */
-    private function request(string $url, $body, int $recordCount): array
+    private function request(string $url, $body, int $recordCount, ?int $timeoutMs = null): array
     {
         $payload = json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
@@ -71,7 +74,8 @@ class CurlHttpTransport implements HttpTransportInterface
         $response = $this->execute(
             $url,
             [CURLOPT_POST => true, CURLOPT_POSTFIELDS => $payload],
-            ['Content-Type: application/json', 'Accept: application/json']
+            ['Content-Type: application/json', 'Accept: application/json'],
+            $timeoutMs
         );
         $response['recordCount'] = $recordCount;
 
@@ -81,9 +85,10 @@ class CurlHttpTransport implements HttpTransportInterface
     /**
      * @param array<int, mixed> $methodOptions
      * @param array<int, string> $headers
+     * @param int|null $timeoutMs per-request override; null uses the transport default
      * @return array{statusCode: int, body: mixed}
      */
-    private function execute(string $url, array $methodOptions, array $headers): array
+    private function execute(string $url, array $methodOptions, array $headers, ?int $timeoutMs = null): array
     {
         $ch = curl_init();
 
@@ -97,7 +102,7 @@ class CurlHttpTransport implements HttpTransportInterface
             CURLOPT_URL => $url,
             CURLOPT_HTTPHEADER => $headers,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT_MS => $this->timeoutMs,
+            CURLOPT_TIMEOUT_MS => $timeoutMs ?? $this->timeoutMs,
             CURLOPT_FOLLOWLOCATION => false,
         ]);
 
