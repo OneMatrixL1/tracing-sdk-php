@@ -4,13 +4,14 @@ declare(strict_types=1);
 
 require __DIR__ . '/../../vendor/autoload.php';
 
+use Tracing\Sdk\SendOptions;
 use Tracing\Sdk\TracingSDK;
 
 // Send a record, then look the anchor up again by its hash via
 // GET /api/anchors?hash=...
 $sdk = new TracingSDK([
     'endpoint' => 'http://localhost:3000', // replace with your provided indexer endpoint
-    'dataType' => 'json',
+    'options'  => SendOptions::dataType('json'), // default for every send/sendBatch
     'auth'     => [
         'type'  => 'apiToken',
         'token' => 'your-api-token', // replace with your provided API token

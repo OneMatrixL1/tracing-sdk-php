@@ -13,13 +13,14 @@ composer require onematrix/tracing-sdk
 ## Usage
 
 ```php
+use Tracing\Sdk\SendOptions;
 use Tracing\Sdk\TracingSDK;
 
 $sdk = new TracingSDK([
     'endpoint' => 'https://indexer.example.com',
-    'dataType' => 'json',      // 'json' | 'xml' | 'raw'
+    'options'  => SendOptions::dataType('json'), // default: 'json' | 'xml' | 'raw'
     'auth'     => [
-        'type'  => 'apiToken', // 'mTLS' | 'basic' | 'apiToken'
+        'type'  => 'apiToken',                   // 'mTLS' | 'basic' | 'apiToken'
         'token' => 'your-api-token',
     ],
 ]);
@@ -40,9 +41,28 @@ $anchor = $sdk->queryByHash($result['hash']);      // GET {endpoint}/api/anchors
 echo $anchor['txHashes'][0];
 ```
 
+### Choosing the data type
+
+`dataType` decides how a record is canonicalized before hashing. It travels in a `SendOptions` object, which can be set as the config default, per call, or both:
+
+```php
+use Tracing\Sdk\SendOptions;
+
+// Uses the config default.
+$sdk->send($rawJson, $signingTime);
+
+// Overrides it for this call only.
+$sdk->send($rawXml, $signingTime, SendOptions::dataType('xml'));
+$sdk->sendBatch($xmlRecords, SendOptions::dataType('xml'));
+```
+
+A per-call `SendOptions` wins over the config one; when neither supplies a `dataType`, the call throws `ConfigException`. That makes `options` optional in the constructor — omit it if every call passes its own. Each `sendBatch()` call canonicalizes all of its records with one data type, so send mixed types as separate calls.
+
+`SendOptions` is immutable: `new SendOptions('json')` and `SendOptions::dataType('json')` are equivalent, and `withDataType()` returns a modified copy rather than mutating the original.
+
 `send()` returns `['hash' => …, 'response' => ['statusCode', 'body', 'recordCount']]`. `sendBatch()` sends every record in a single request and returns one such entry per input record, in input order — each carries its own `hash` and shares the one `response` of that request.
 
-`send()`/`sendBatch()` throw `Tracing\Sdk\Exception\TransportException` on a failed or rejected request — catch it, retry, queue, batch up before sending, or whatever else suits the caller. They throw `Tracing\Sdk\Exception\ConfigException` when `signingTime` is missing or a batch record lacks `rawData`/`signingTime`, and `Tracing\Sdk\Exception\CanonicalizationException` when `rawData` can't be canonicalized for the configured `dataType`; both are raised before anything is sent.
+`send()`/`sendBatch()` throw `Tracing\Sdk\Exception\TransportException` on a failed or rejected request — catch it, retry, queue, batch up before sending, or whatever else suits the caller. They throw `Tracing\Sdk\Exception\ConfigException` when `signingTime` is missing or a batch record lacks `rawData`/`signingTime`, and `Tracing\Sdk\Exception\CanonicalizationException` when `rawData` can't be canonicalized for the chosen `dataType`; both are raised before anything is sent.
 
 ### Runnable examples
 
@@ -52,7 +72,7 @@ echo $anchor['txHashes'][0];
 | --- | --- |
 | [`example/php/single-send-example.php`](example/php/single-send-example.php) | Sending one JSON record with `send()` |
 | [`example/php/example.php`](example/php/example.php) | Sending several JSON records in one request with `sendBatch()` |
-| [`example/php/xml-example.php`](example/php/xml-example.php) | The same batch flow with `dataType: 'xml'` |
+| [`example/php/xml-example.php`](example/php/xml-example.php) | The same batch flow with `SendOptions::dataType('xml')` |
 | [`example/php/query-example.php`](example/php/query-example.php) | Sending a record, then looking the anchor up with `queryByHash()` |
 
 Each script points at `http://localhost:3000` with a placeholder API token — edit the `endpoint` and `auth` values at the top to match your Indexer, then run:

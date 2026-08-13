@@ -29,8 +29,11 @@ class TracingSDK
     public const DATA_TYPE_XML = 'xml';
     public const DATA_TYPE_RAW = 'raw';
 
-    /** @var CanonicalizerInterface */
-    private $canonicalizer;
+    /** @var array<string, CanonicalizerInterface> */
+    private $canonicalizers = [];
+
+    /** @var SendOptions */
+    private $defaultOptions;
 
     /** @var HasherInterface */
     private $hasher;
@@ -38,13 +41,26 @@ class TracingSDK
     /** @var HttpTransportInterface */
     private $transport;
 
+    /**
+     * @param array{endpoint: string, auth: array, options?: SendOptions} $config
+     *        "options" holds the defaults every send()/sendBatch()/hash() call
+     *        falls back to when it doesn't pass its own SendOptions.
+     */
     public function __construct(array $config)
     {
-        $this->assertRequiredKeys($config, ['endpoint', 'dataType', 'auth']);
+        $this->assertRequiredKeys($config, ['endpoint', 'auth']);
 
-        $dataType = strtolower((string) $config['dataType']);
+        if (isset($config['options']) && !$config['options'] instanceof SendOptions) {
+            throw new ConfigException('Config key "options" must be a ' . SendOptions::class);
+        }
 
-        $this->canonicalizer = $this->createCanonicalizer($dataType);
+        $this->defaultOptions = $config['options'] ?? new SendOptions();
+
+        if ($this->defaultOptions->getDataType() !== null) {
+            // Fail fast on an unsupported default rather than at the first send().
+            $this->canonicalizerFor(null);
+        }
+
         $this->hasher = new Keccak256Hasher();
         $this->transport = new CurlHttpTransport(
             (string) $config['endpoint'],
@@ -57,19 +73,20 @@ class TracingSDK
      *
      * @param string $rawData
      * @param mixed $signingTime
+     * @param SendOptions|null $options per-call overrides; falls back to config
      * @return array{hash: string, response: array{statusCode: int, body: mixed, recordCount: int}}
      * @throws \Tracing\Sdk\Exception\CanonicalizationException
-     * @throws ConfigException if signingTime is missing
+     * @throws ConfigException if signingTime is missing, or no dataType is given here or in config
      * @throws TransportException
      */
-    public function send(string $rawData, $signingTime): array
+    public function send(string $rawData, $signingTime, ?SendOptions $options = null): array
     {
         if ($signingTime === null) {
             throw new ConfigException('signingTime is required');
         }
 
         $entry = [
-            'hash' => $this->hash($rawData),
+            'hash' => $this->hash($rawData, $options),
             'signingTime' => $signingTime,
         ];
 
@@ -83,12 +100,14 @@ class TracingSDK
      * Canonicalize, hash, and send multiple records via POST /api/anchors/batch.
      *
      * @param array<int, array{rawData: string, signingTime: mixed}> $records
+     * @param SendOptions|null $options per-call overrides; falls back to config
      * @return array<int, array{hash: string, response: array{statusCode: int, body: mixed, recordCount: int}}>
      * @throws \Tracing\Sdk\Exception\CanonicalizationException
-     * @throws ConfigException if a record is missing "rawData" or "signingTime", or either is null
+     * @throws ConfigException if a record is missing "rawData" or "signingTime", either is null,
+     *         or no dataType is given here or in config
      * @throws TransportException
      */
-    public function sendBatch(array $records): array
+    public function sendBatch(array $records, ?SendOptions $options = null): array
     {
         $entries = [];
 
@@ -98,7 +117,7 @@ class TracingSDK
             }
 
             $entries[] = [
-                'hash' => $this->hash((string) $record['rawData']),
+                'hash' => $this->hash((string) $record['rawData'], $options),
                 'signingTime' => $record['signingTime'],
             ];
         }
@@ -115,13 +134,15 @@ class TracingSDK
 
     /**
      * @param string $rawData
-     * @return string 
+     * @param SendOptions|null $options per-call overrides; falls back to config
+     * @return string
      * @throws \Tracing\Sdk\Exception\CanonicalizationException
-     * @throws ConfigException if a record is missing "rawData" or "signingTime"
+     * @throws ConfigException if no dataType is given here or in config
      */
-    public function hash(string $rawData): string
+    public function hash(string $rawData, ?SendOptions $options = null): string
     {
-        $canonical = $this->canonicalizer->canonicalize($rawData);
+        $dataType = $options !== null ? $options->getDataType() : null;
+        $canonical = $this->canonicalizerFor($dataType)->canonicalize($rawData);
 
         return $this->hasher->hash($canonical);
     }
@@ -171,6 +192,27 @@ class TracingSDK
     public function setTransportForTesting(HttpTransportInterface $transport): void
     {
         $this->transport = $transport;
+    }
+
+    /**
+     * Resolve the canonicalizer for this call: the per-call dataType when one
+     * was given, otherwise the config default. Instances are reused.
+     */
+    private function canonicalizerFor(?string $dataType): CanonicalizerInterface
+    {
+        $dataType = $dataType !== null ? $dataType : $this->defaultOptions->getDataType();
+
+        if ($dataType === null) {
+            throw new ConfigException('dataType is required, either in the config "options" or per call');
+        }
+
+        $dataType = strtolower($dataType);
+
+        if (!isset($this->canonicalizers[$dataType])) {
+            $this->canonicalizers[$dataType] = $this->createCanonicalizer($dataType);
+        }
+
+        return $this->canonicalizers[$dataType];
     }
 
     private function createCanonicalizer(string $dataType): CanonicalizerInterface

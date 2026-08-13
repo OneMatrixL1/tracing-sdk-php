@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 require __DIR__ . '/../../vendor/autoload.php';
 
+use Tracing\Sdk\SendOptions;
 use Tracing\Sdk\TracingSDK;
 
 // Send a single record right away via POST /api/anchors instead of batching.
 $sdk = new TracingSDK([
     'endpoint' => 'http://localhost:3000', // replace with your provided indexer endpoint
-    'dataType' => 'json',
+    'options'  => SendOptions::dataType('raw'), // default for every send/sendBatch
     'auth'     => [
         'type'  => 'apiToken',
         'token' => 'your-api-token', // replace with your provided API token
@@ -17,7 +18,7 @@ $sdk = new TracingSDK([
 ]);
 
 try {
-    $result = $sdk->send(json_encode(['orderId' => 1]), time());
+    $result = $sdk->send(json_encode(['orderId' => 1]), time(), SendOptions::dataType('json')); // override default data type for this send
     printf(
         "[sent] %s -> HTTP %d%s\n",
         $result['hash'],

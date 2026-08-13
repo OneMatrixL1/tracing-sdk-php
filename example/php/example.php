@@ -4,13 +4,14 @@ declare(strict_types=1);
 
 require __DIR__ . '/../../vendor/autoload.php';
 
+use Tracing\Sdk\SendOptions;
 use Tracing\Sdk\TracingSDK;
 
 // The SDK canonicalizes + hashes (Keccak-256) and sends in one call — you
 // decide when and how (single record vs. batch).
 $sdk = new TracingSDK([
     'endpoint' => 'http://localhost:3000', // replace with your provided indexer endpoint
-    'dataType' => 'json',
+    'options'  => SendOptions::dataType('json'), // default for every send/sendBatch
     'auth'     => [
         'type'  => 'apiToken',
         'token' => 'your-api-token', // replace with your provided API token

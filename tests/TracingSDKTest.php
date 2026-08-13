@@ -8,6 +8,7 @@ use PHPUnit\Framework\TestCase;
 use Tracing\Sdk\Exception\ConfigException;
 use Tracing\Sdk\Exception\TransportException;
 use Tracing\Sdk\Hash\Keccak256Hasher;
+use Tracing\Sdk\SendOptions;
 use Tracing\Sdk\TracingSDK;
 
 class TracingSDKTest extends TestCase
@@ -16,7 +17,7 @@ class TracingSDKTest extends TestCase
     {
         return new TracingSDK(array_merge([
             'endpoint' => 'https://indexer.example.com',
-            'dataType' => 'json',
+            'options' => SendOptions::dataType('json'),
             'auth' => ['type' => 'apiToken', 'token' => 'test-token'],
         ], $overrides));
     }
@@ -143,7 +144,7 @@ class TracingSDKTest extends TestCase
 
     public function testRawDataTypeHashesInputByteForByteWithoutCanonicalizing(): void
     {
-        $sdk = $this->makeSdk(['dataType' => 'raw']);
+        $sdk = $this->makeSdk(['options' => SendOptions::dataType('raw')]);
         $sdk->setTransportForTesting(new FakeTransport());
 
         // Deliberately not valid JSON/XML — 'raw' must not try to parse it.
@@ -154,11 +155,97 @@ class TracingSDKTest extends TestCase
         $this->assertSame($expectedHash, $result['hash']);
     }
 
+    public function testSendOptionsDataTypeOverridesTheConfigDefault(): void
+    {
+        $sdk = $this->makeSdk(['options' => SendOptions::dataType('json')]);
+        $sdk->setTransportForTesting(new FakeTransport());
+
+        $rawData = '  not json, not xml, just bytes  ';
+        $result = $sdk->send($rawData, 1000, SendOptions::dataType('raw'));
+
+        $this->assertSame((new Keccak256Hasher())->hash($rawData), $result['hash']);
+    }
+
+    public function testSendBatchOptionsDataTypeOverridesTheConfigDefault(): void
+    {
+        $sdk = $this->makeSdk(['options' => SendOptions::dataType('json')]);
+        $sdk->setTransportForTesting(new FakeTransport());
+
+        $xml = '<order><id>1</id></order>';
+        $results = $sdk->sendBatch(
+            [['rawData' => $xml, 'signingTime' => 1]],
+            SendOptions::dataType('xml')
+        );
+
+        $xmlSdk = $this->makeSdk(['options' => SendOptions::dataType('xml')]);
+        $xmlSdk->setTransportForTesting(new FakeTransport());
+
+        $this->assertSame($xmlSdk->hash($xml), $results[0]['hash']);
+    }
+
+    public function testConfigDataTypeIsUsedWhenOptionsOmitIt(): void
+    {
+        $sdk = $this->makeSdk(['options' => SendOptions::dataType('json')]);
+        $sdk->setTransportForTesting(new FakeTransport());
+
+        $withoutOptions = $sdk->send('{"b":1,"a":2}', 1);
+        $withEmptyOptions = $sdk->send('{"a":2,"b":1}', 2, new SendOptions());
+
+        $this->assertSame($withoutOptions['hash'], $withEmptyOptions['hash']);
+    }
+
+    public function testDataTypeMayBeOmittedFromConfigWhenEveryCallSuppliesIt(): void
+    {
+        $sdk = new TracingSDK([
+            'endpoint' => 'https://indexer.example.com',
+            'auth' => ['type' => 'apiToken', 'token' => 'test-token'],
+        ]);
+        $sdk->setTransportForTesting(new FakeTransport());
+
+        $result = $sdk->send('{"a":1}', 1, SendOptions::dataType('json'));
+
+        $this->assertStringStartsWith('0x', $result['hash']);
+    }
+
+    public function testSendWithoutAnyDataTypeThrows(): void
+    {
+        $sdk = new TracingSDK([
+            'endpoint' => 'https://indexer.example.com',
+            'auth' => ['type' => 'apiToken', 'token' => 'test-token'],
+        ]);
+        $transport = new FakeTransport();
+        $sdk->setTransportForTesting($transport);
+
+        try {
+            $sdk->send('{"a":1}', 1);
+            $this->fail('Expected ConfigException');
+        } catch (ConfigException $e) {
+            $this->assertSame([], $transport->singleCalls);
+        }
+    }
+
+    public function testNonSendOptionsConfigOptionsThrows(): void
+    {
+        $this->expectException(ConfigException::class);
+
+        $this->makeSdk(['options' => ['dataType' => 'json']]);
+    }
+
+    public function testUnsupportedDataTypeInOptionsThrows(): void
+    {
+        $sdk = $this->makeSdk();
+        $sdk->setTransportForTesting(new FakeTransport());
+
+        $this->expectException(ConfigException::class);
+
+        $sdk->send('{"a":1}', 1, SendOptions::dataType('yaml'));
+    }
+
     public function testUnsupportedDataTypeThrows(): void
     {
         $this->expectException(ConfigException::class);
 
-        $this->makeSdk(['dataType' => 'yaml']);
+        $this->makeSdk(['options' => SendOptions::dataType('yaml')]);
     }
 
     public function testUnsupportedAuthTypeThrows(): void
