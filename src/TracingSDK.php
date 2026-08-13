@@ -64,7 +64,14 @@ class TracingSDK
      */
     public function send(string $rawData, $signingTime): array
     {
-        $entry = $this->hash($rawData, $signingTime);
+        if ($signingTime === null) {
+            throw new ConfigException('signingTime is required');
+        }
+
+        $entry = [
+            'hash' => $this->hash($rawData),
+            'signingTime' => $signingTime,
+        ];
 
         return [
             'hash' => $entry['hash'],
@@ -78,7 +85,7 @@ class TracingSDK
      * @param array<int, array{rawData: string, signingTime: mixed}> $records
      * @return array<int, array{hash: string, response: array{statusCode: int, body: mixed, recordCount: int}}>
      * @throws \Tracing\Sdk\Exception\CanonicalizationException
-     * @throws ConfigException if a record is missing "rawData" or "signingTime"
+     * @throws ConfigException if a record is missing "rawData" or "signingTime", or either is null
      * @throws TransportException
      */
     public function sendBatch(array $records): array
@@ -86,11 +93,14 @@ class TracingSDK
         $entries = [];
 
         foreach ($records as $record) {
-            if (!\array_key_exists('rawData', $record) || !\array_key_exists('signingTime', $record)) {
+            if (!isset($record['rawData']) || !isset($record['signingTime'])) {
                 throw new ConfigException('Each record requires "rawData" and "signingTime"');
             }
 
-            $entries[] = $this->hash((string) $record['rawData'], $record['signingTime']);
+            $entries[] = [
+                'hash' => $this->hash((string) $record['rawData']),
+                'signingTime' => $record['signingTime'],
+            ];
         }
 
         $response = $this->transport->sendBatch($entries);
@@ -105,21 +115,15 @@ class TracingSDK
 
     /**
      * @param string $rawData
-     * @param mixed $signingTime
-     * @return array{hash: string, signingTime: mixed}
+     * @return string 
+     * @throws \Tracing\Sdk\Exception\CanonicalizationException
+     * @throws ConfigException if a record is missing "rawData" or "signingTime"
      */
-    private function hash(string $rawData, $signingTime): array
+    public function hash(string $rawData): string
     {
-        if ($signingTime === null) {
-            throw new ConfigException('signingTime is required');
-        }
-
         $canonical = $this->canonicalizer->canonicalize($rawData);
 
-        return [
-            'hash' => $this->hasher->hash($canonical),
-            'signingTime' => $signingTime,
-        ];
+        return $this->hasher->hash($canonical);
     }
 
     /**

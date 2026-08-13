@@ -113,18 +113,32 @@ class TracingSDKTest extends TestCase
         $this->assertSame([], $transport->singleCalls);
     }
 
-    public function testSendBatchRequiresRawDataAndSigningTimeKeys(): void
+    /**
+     * @dataProvider invalidBatchRecordProvider
+     */
+    public function testSendBatchRejectsRecordWithoutUsableRawDataAndSigningTime(array $record): void
     {
         $sdk = $this->makeSdk();
         $transport = new FakeTransport();
         $sdk->setTransportForTesting($transport);
 
         try {
-            $sdk->sendBatch([['rawData' => '{"a":1}']]);
+            $sdk->sendBatch([['rawData' => '{"a":1}', 'signingTime' => 1], $record]);
             $this->fail('Expected ConfigException');
         } catch (ConfigException $e) {
+            // Nothing is sent, so one bad record can't half-anchor a batch.
             $this->assertSame([], $transport->batchCalls);
         }
+    }
+
+    public static function invalidBatchRecordProvider(): array
+    {
+        return [
+            'missing signingTime' => [['rawData' => '{"a":1}']],
+            'null signingTime' => [['rawData' => '{"a":1}', 'signingTime' => null]],
+            'missing rawData' => [['signingTime' => 1]],
+            'null rawData' => [['rawData' => null, 'signingTime' => 1]],
+        ];
     }
 
     public function testRawDataTypeHashesInputByteForByteWithoutCanonicalizing(): void
