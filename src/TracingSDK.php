@@ -126,10 +126,10 @@ class TracingSDK
      * Look up an anchored record by its hash via GET /api/anchors?hash=...
      *
      * @param string $hash
-     * @return array{hash: string, txHash: string}
+     * @return array{hash: string, txHashes: array<int, string>}
      * @throws TransportException if the request fails,
      *         the Indexer returns a non-2xx status, or the response body is
-     *         not the expected { hash, txHash } object
+     *         not the expected { hash, txHashes } object
      * @throws ConfigException if hash is empty
      */
     public function queryByHash(string $hash): array
@@ -146,11 +146,17 @@ class TracingSDK
 
         $body = $response['body'];
 
-        if (!\is_array($body) || !isset($body['hash'], $body['txHash'])) {
-            throw new TransportException('Unexpected response body for query by hash, expected { hash, txHash }');
+        if (!\is_array($body) || !isset($body['hash']) || !isset($body['txHashes']) || !\is_array($body['txHashes'])) {
+            throw new TransportException('Unexpected response body for query by hash, expected { hash, txHashes }');
         }
 
-        return ['hash' => (string) $body['hash'], 'txHash' => (string) $body['txHash']];
+        $txHashes = [];
+
+        foreach ($body['txHashes'] as $txHash) {
+            $txHashes[] = (string) $txHash;
+        }
+
+        return ['hash' => (string) $body['hash'], 'txHashes' => $txHashes];
     }
 
     /**

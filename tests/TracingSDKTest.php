@@ -178,7 +178,7 @@ class TracingSDKTest extends TestCase
         $sdk->sendBatch([['rawData' => '{"a":1}', 'signingTime' => 1]]);
     }
 
-    public function testQueryByHashReturnsHashAndTxHash(): void
+    public function testQueryByHashReturnsHashAndEveryTxHash(): void
     {
         $sdk = $this->makeSdk();
         $transport = new FakeTransport();
@@ -186,8 +186,30 @@ class TracingSDKTest extends TestCase
 
         $result = $sdk->queryByHash('0xdeadbeef');
 
-        $this->assertSame(['hash' => '0xdeadbeef', 'txHash' => '0xabc'], $result);
+        $this->assertSame(['hash' => '0xdeadbeef', 'txHashes' => ['0xabc', '0xdef']], $result);
         $this->assertSame(['0xdeadbeef'], $transport->queryCalls);
+    }
+
+    public function testQueryByHashReturnsEmptyTxHashesWhenIndexerReportsNone(): void
+    {
+        $sdk = $this->makeSdk();
+        $transport = new FakeTransport();
+        $transport->queryResponse = ['statusCode' => 200, 'body' => ['hash' => '0xdeadbeef', 'txHashes' => []]];
+        $sdk->setTransportForTesting($transport);
+
+        $this->assertSame(['hash' => '0xdeadbeef', 'txHashes' => []], $sdk->queryByHash('0xdeadbeef'));
+    }
+
+    public function testQueryByHashRejectsScalarTxHashes(): void
+    {
+        $sdk = $this->makeSdk();
+        $transport = new FakeTransport();
+        $transport->queryResponse = ['statusCode' => 200, 'body' => ['hash' => '0xdeadbeef', 'txHash' => '0xabc']];
+        $sdk->setTransportForTesting($transport);
+
+        $this->expectException(TransportException::class);
+
+        $sdk->queryByHash('0xdeadbeef');
     }
 
     public function testQueryByHashRejectsEmptyHash(): void

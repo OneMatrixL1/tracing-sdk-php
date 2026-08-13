@@ -37,7 +37,7 @@ $results = $sdk->sendBatch([
 
 // Look up an already-anchored record by its hash.
 $anchor = $sdk->queryByHash($result['hash']);      // GET {endpoint}/api/anchors?hash=...
-echo $anchor['txHash'];
+echo $anchor['txHashes'][0];
 ```
 
 `send()` returns `['hash' => …, 'response' => ['statusCode', 'body', 'recordCount']]`. `sendBatch()` sends every record in a single request and returns one such entry per input record, in input order — each carries its own `hash` and shares the one `response` of that request.
@@ -53,6 +53,7 @@ echo $anchor['txHash'];
 | [`example/php/single-send-example.php`](example/php/single-send-example.php) | Sending one JSON record with `send()` |
 | [`example/php/example.php`](example/php/example.php) | Sending several JSON records in one request with `sendBatch()` |
 | [`example/php/xml-example.php`](example/php/xml-example.php) | The same batch flow with `dataType: 'xml'` |
+| [`example/php/query-example.php`](example/php/query-example.php) | Sending a record, then looking the anchor up with `queryByHash()` |
 
 Each script points at `http://localhost:3000` with a placeholder API token — edit the `endpoint` and `auth` values at the top to match your Indexer, then run:
 
@@ -63,14 +64,14 @@ php example/php/single-send-example.php
 
 ### Querying an anchor by hash
 
-`queryByHash()` resolves a record's hash to the blockchain transaction that anchored it, via `GET {endpoint}/api/anchors?hash=<hash>`. The hash is URL-encoded for you, and the configured auth is applied exactly as it is for sending.
+`queryByHash()` resolves a record's hash to the blockchain transactions that anchored it, via `GET {endpoint}/api/anchors?hash=<hash>`. The hash is URL-encoded for you, and the configured auth is applied exactly as it is for sending.
 
 ```php
 use Tracing\Sdk\Exception\TransportException;
 
 try {
     $anchor = $sdk->queryByHash('0x1c8a…');
-    // ['hash' => '0x1c8a…', 'txHash' => '0x9f42…']
+    // ['hash' => '0x1c8a…', 'txHashes' => ['0x9f42…', '0x3b07…']]
 } catch (TransportException $e) {
     // Not yet anchored, unknown hash, or the Indexer was unreachable.
     echo $e->getMessage();
@@ -82,9 +83,9 @@ Returns an array with exactly two keys:
 | Key | Description |
 | --- | --- |
 | `hash` | The record hash that was queried, as echoed back by the Indexer. |
-| `txHash` | Hash of the blockchain transaction the record was anchored in. |
+| `txHashes` | List of blockchain transactions the record was anchored in. The same record can be anchored more than once, so this is always a list — iterate it rather than assuming a single element. |
 
-It throws `Tracing\Sdk\Exception\ConfigException` when `$hash` is empty, and `Tracing\Sdk\Exception\TransportException` when the request fails, the Indexer answers with a non-2xx status (including the `404` you get for a hash that was never anchored), or the response body isn't a `{ hash, txHash }` object. A hash that hasn't been anchored yet is therefore an exception, not a `null` return — so a lookup that must tolerate "not there yet" belongs in a `try`/`catch`.
+It throws `Tracing\Sdk\Exception\ConfigException` when `$hash` is empty, and `Tracing\Sdk\Exception\TransportException` when the request fails, the Indexer answers with a non-2xx status (including the `404` you get for a hash that was never anchored), or the response body isn't a `{ hash, txHashes }` object. A hash that hasn't been anchored yet is therefore an exception, not a `null` return — so a lookup that must tolerate "not there yet" belongs in a `try`/`catch`.
 
 Hashing is deterministic, so the same record always yields the same hash — keep the `hash` returned by `send()`/`sendBatch()` and query it whenever you need to.
 
