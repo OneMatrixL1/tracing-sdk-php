@@ -140,7 +140,7 @@ Hashing is deterministic: the same record always produces the same hash, on any 
 | Value | Behaviour |
 | --- | --- |
 | `json` | [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785) JSON Canonicalization Scheme — keys sorted by UTF-16 code unit, numbers normalized per ECMAScript `Number::toString` (`1`, `1.0`, `1e0` are identical; `-0` → `0`). |
-| `xml` | W3C Canonical XML via `DOMDocument::C14N()` — normalizes attribute order and insignificant whitespace. External entity resolution is disabled (XXE protection). |
+| `xml` | [Exclusive XML Canonicalization 1.0](https://www.w3.org/TR/xml-exc-c14n/) (`http://www.w3.org/2001/10/xml-exc-c14n#`), without comments, via `DOMDocument::C14N(true)` — normalizes attribute order and insignificant whitespace, and keeps only the namespace declarations the document actually uses. Namespace prefixes remain significant (Exclusive 1.0 has no prefix rewriting). External entity resolution is disabled (XXE protection). |
 | `raw` | No parsing at all — the bytes you pass are hashed exactly as given. Use when the caller already guarantees one deterministic representation. |
 
 ### Resolution order

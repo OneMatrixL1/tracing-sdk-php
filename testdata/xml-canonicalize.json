@@ -1,9 +1,11 @@
 {
     "description": "Rule: parse the XML and serialize it using W3C Canonical XML (C14N) — https://www.w3.org/TR/xml-c14n — which normalizes attribute order and insignificant whitespace between elements. Every language SDK's canonicalizer must produce exactly `expectedOutput` (byte-for-byte) for every string in `input`/`inputs`. External entity resolution MUST be disabled: parsing untrusted XML must never fetch or inline external/SYSTEM entities (XXE).",
     "format": {
-        "algorithm": "W3C Canonical XML 1.0 (C14N), no comments, no exclusive namespace processing needed for these fixtures (none use namespaces)",
+        "algorithm": "Exclusive XML Canonicalization 1.0 (http://www.w3.org/2001/10/xml-exc-c14n#, https://www.w3.org/TR/xml-exc-c14n/), no comments — only visibly-utilized namespace declarations are emitted, and namespace prefixes remain significant (Exclusive 1.0 has no prefix rewriting). None of the fixtures below use namespaces, so they produce identical output under Inclusive C14N 1.0 and do not exercise the difference.",
         "attributeOrder": "normalized (C14N-defined order)",
-        "whitespace": "insignificant inter-element whitespace removed; empty elements serialized as an explicit open/close tag pair (e.g. `<root/>` becomes `<root></root>`)"
+        "whitespace": "insignificant inter-element whitespace removed; empty elements serialized as an explicit open/close tag pair (e.g. `<root/>` becomes `<root></root>`)",
+        "prolog": "the XML declaration (`<?xml version=\"1.0\" encoding=\"...\" standalone=\"...\"?>`), any DOCTYPE, and a leading UTF-8 byte order mark are all DROPPED — C14N 1.0 emits no prolog. Comments are dropped too (canonicalization runs without comments). Output is ALWAYS UTF-8 regardless of the declared encoding, so a document declaring ISO-8859-1 and the same document declaring UTF-8 canonicalize to identical bytes.",
+        "processingInstructions": "KEPT, unlike comments. A PI before the root element is emitted followed by a newline (0x0A); a PI after the root element is emitted preceded by a newline; a PI inside the root is emitted in place with no added whitespace (C14N 1.0 section 2.6)."
     },
     "cases": [
         {
@@ -56,6 +58,74 @@
             "description": "A self-closed empty tag and an explicit open/close pair are equivalent",
             "inputs": ["<root></root>", "<root/>"],
             "expectedOutput": "<root></root>"
+        },
+        {
+            "id": "xml-declaration-removed",
+            "description": "The XML declaration is not part of the canonical form: present or absent, and whatever version/encoding/standalone it carries, the output is the same",
+            "inputs": [
+                "<root><a>1</a></root>",
+                "<?xml version=\"1.0\"?><root><a>1</a></root>",
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?><root><a>1</a></root>",
+                "<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?>\n<root><a>1</a></root>",
+                "<?xml version=\"1.1\"?><root><a>1</a></root>"
+            ],
+            "expectedOutput": "<root><a>1</a></root>"
+        },
+        {
+            "id": "byte-order-mark-removed",
+            "description": "A leading UTF-8 byte order mark is an encoding artifact, not content, and must not reach the canonical output",
+            "inputs": [
+                "﻿<?xml version=\"1.0\"?><root><a>1</a></root>",
+                "﻿<root><a>1</a></root>"
+            ],
+            "expectedOutput": "<root><a>1</a></root>"
+        },
+        {
+            "id": "declared-encoding-does-not-affect-output",
+            "description": "Canonical output is always UTF-8 whatever the declaration says. All three inputs are pure ASCII bytes carrying the same character (via a numeric character reference, or literally in UTF-8), so a conforming SDK emits the same UTF-8 bytes for each — the é below is C3 A9.",
+            "inputs": [
+                "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><root>caf&#233;</root>",
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?><root>caf&#233;</root>",
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?><root>café</root>",
+                "<root>café</root>"
+            ],
+            "expectedOutput": "<root>café</root>"
+        },
+        {
+            "id": "doctype-removed",
+            "description": "A DOCTYPE declaration is dropped; the element content it precedes is unaffected",
+            "inputs": [
+                "<?xml version=\"1.0\"?><!DOCTYPE root><root><a>1</a></root>",
+                "<root><a>1</a></root>"
+            ],
+            "expectedOutput": "<root><a>1</a></root>"
+        },
+        {
+            "id": "comments-removed",
+            "description": "Canonicalization runs without comments, so comments before, inside, and after the root element are all dropped",
+            "inputs": [
+                "<?xml version=\"1.0\"?><!-- header --><root><!-- inner --><a>1</a></root><!-- footer -->",
+                "<root><a>1</a></root>"
+            ],
+            "expectedOutput": "<root><a>1</a></root>"
+        },
+        {
+            "id": "processing-instruction-outside-root-kept",
+            "description": "Unlike comments, processing instructions survive canonicalization. One outside the root element is separated from it by a single newline (0x0A): after the PI when the PI precedes the root, before the PI when it follows.",
+            "input": "<?xml version=\"1.0\"?><?target data?><root><a>1</a></root>",
+            "expectedOutput": "<?target data?>\n<root><a>1</a></root>"
+        },
+        {
+            "id": "processing-instruction-after-root-kept",
+            "description": "A trailing processing instruction is kept, preceded by a newline (must differ from the leading-PI case's output)",
+            "input": "<?xml version=\"1.0\"?><root><a>1</a></root><?target data?>",
+            "expectedOutput": "<root><a>1</a></root>\n<?target data?>"
+        },
+        {
+            "id": "processing-instruction-inside-root-kept",
+            "description": "A processing instruction within the root element is emitted in place, with no added whitespace",
+            "input": "<root><?target data?><a>1</a></root>",
+            "expectedOutput": "<root><?target data?><a>1</a></root>"
         },
         {
             "id": "invalid-xml",

@@ -140,7 +140,7 @@ Việc băm là tất định (deterministic): cùng một bản ghi luôn cho r
 | Giá trị | Hành vi |
 | --- | --- |
 | `json` | Chuẩn [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785) (JSON Canonicalization Scheme) — sắp xếp khoá theo giá trị đơn vị mã UTF-16, chuẩn hoá số theo thuật toán `Number::toString` của ECMAScript (`1`, `1.0`, `1e0` là như nhau; `-0` → `0`). |
-| `xml` | Canonical XML của W3C qua `DOMDocument::C14N()` — chuẩn hoá thứ tự thuộc tính và khoảng trắng không đáng kể. Việc phân giải external entity bị tắt (chống XXE). |
+| `xml` | [Exclusive XML Canonicalization 1.0](https://www.w3.org/TR/xml-exc-c14n/) (`http://www.w3.org/2001/10/xml-exc-c14n#`), không kèm comment, qua `DOMDocument::C14N(true)` — chuẩn hoá thứ tự thuộc tính và khoảng trắng không đáng kể, và chỉ giữ lại các khai báo namespace mà tài liệu thực sự sử dụng. Prefix của namespace vẫn ảnh hưởng đến kết quả (Exclusive 1.0 không có cơ chế prefix rewriting). Việc phân giải external entity bị tắt (chống XXE). |
 | `raw` | Không phân tích cú pháp — băm đúng chuỗi byte bạn truyền vào. Dùng khi phía gọi đã tự đảm bảo dữ liệu chỉ có một biểu diễn tất định. |
 
 ### Thứ tự ưu tiên

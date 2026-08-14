@@ -7,9 +7,10 @@ namespace Tracing\Sdk\Canonicalize;
 use Tracing\Sdk\Exception\CanonicalizationException;
 
 /**
- * Canonical XML via the W3C C14N algorithm (DOMDocument::C14N()): it fixes
+ * Canonical XML via Exclusive C14N 1.0 (DOMDocument::C14N(true)): it fixes
  * attribute/namespace ordering and insignificant whitespace so two
- * differently-serialized-but-equivalent documents hash identically.
+ * differently-serialized-but-equivalent documents hash identically. Prefixes
+ * are still significant — Exclusive 1.0 has no prefix rewriting.
  *
  * External entity resolution is disabled throughout — rawData is untrusted
  * caller input and must never trigger XXE (file disclosure / SSRF).
@@ -37,7 +38,10 @@ class XmlCanonicalizer implements CanonicalizerInterface
                 throw new CanonicalizationException('Invalid XML payload: ' . $this->formatLibxmlErrors());
             }
 
-            $canonical = $dom->C14N();
+            // Exclusive mode: only visibly-utilized namespace declarations are
+            // emitted, so a stray unused xmlns picked up in transit does not
+            // change the digest.
+            $canonical = $dom->C14N(true);
 
             if ($canonical === false) {
                 throw new CanonicalizationException('Failed to canonicalize XML payload');
