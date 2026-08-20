@@ -7,8 +7,9 @@ namespace Tracing\Sdk;
 use Tracing\Sdk\Exception\ConfigException;
 
 /**
- * Per-call overrides for send(), sendBatch(), hash(), and queryByHash().
- * Anything left unset falls back to the value the SDK was constructed with.
+ * Per-call overrides for send(), sendBatch(), hash(), queryByHash(), and
+ * verify(). Anything left unset falls back to the value the SDK was
+ * constructed with.
  */
 final class SendOptions
 {
@@ -18,16 +19,22 @@ final class SendOptions
     /** @var int|null */
     private $timeoutMs;
 
+    /** @var string|null */
+    private $rpcUrl;
+
     /**
      * @param string|null $dataType "json" | "xml" | "raw"
      * @param int|null $timeoutMs how long a single HTTP request may take, in
      *        milliseconds; null falls back to the transport default
+     * @param string|null $rpcUrl JSON-RPC endpoint of a chain node, used by
+     *        verify() to read the anchor event back from chain
      * @throws ConfigException if timeoutMs is not a positive integer
      */
-    public function __construct(?string $dataType = null, ?int $timeoutMs = null)
+    public function __construct(?string $dataType = null, ?int $timeoutMs = null, ?string $rpcUrl = null)
     {
         $this->dataType = $dataType;
         $this->timeoutMs = self::assertTimeoutMs($timeoutMs);
+        $this->rpcUrl = self::normalizeRpcUrl($rpcUrl);
     }
 
     public static function dataType(string $dataType): self
@@ -43,6 +50,14 @@ final class SendOptions
         return new self(null, $timeoutMs);
     }
 
+    /**
+     * @throws ConfigException if rpcUrl is an empty string
+     */
+    public static function rpcUrl(string $rpcUrl): self
+    {
+        return new self(null, null, $rpcUrl);
+    }
+
     public function getDataType(): ?string
     {
         return $this->dataType;
@@ -51,6 +66,11 @@ final class SendOptions
     public function getTimeoutMs(): ?int
     {
         return $this->timeoutMs;
+    }
+
+    public function getRpcUrl(): ?string
+    {
+        return $this->rpcUrl;
     }
 
     public function withDataType(?string $dataType): self
@@ -72,6 +92,17 @@ final class SendOptions
         return $clone;
     }
 
+    /**
+     * @throws ConfigException if rpcUrl is an empty string
+     */
+    public function withRpcUrl(?string $rpcUrl): self
+    {
+        $clone = clone $this;
+        $clone->rpcUrl = self::normalizeRpcUrl($rpcUrl);
+
+        return $clone;
+    }
+
     private static function assertTimeoutMs(?int $timeoutMs): ?int
     {
         if ($timeoutMs !== null && $timeoutMs <= 0) {
@@ -79,5 +110,20 @@ final class SendOptions
         }
 
         return $timeoutMs;
+    }
+
+    private static function normalizeRpcUrl(?string $rpcUrl): ?string
+    {
+        if ($rpcUrl === null) {
+            return null;
+        }
+
+        $rpcUrl = trim($rpcUrl);
+
+        if ($rpcUrl === '') {
+            throw new ConfigException('rpcUrl must be a non-empty URL');
+        }
+
+        return $rpcUrl;
     }
 }

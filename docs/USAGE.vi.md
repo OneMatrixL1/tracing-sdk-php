@@ -2,9 +2,7 @@
 
 > 🇬🇧 English version: [USAGE.md](USAGE.md)
 
-Với mỗi bản ghi bạn đưa vào, SDK làm ba việc: **chuẩn hoá (canonicalize)**, **băm (hash)** bằng Keccak-256, và **gửi** hash tới dịch vụ Indexer.
-
-> **Chức năng query theo hash chưa sẵn sàng.** Phương thức `queryByHash()` đã có trong code, nhưng endpoint tương ứng phía Indexer (`GET /api/anchors?hash=...`) chưa dùng được — chưa nên xây dựng tính năng dựa trên nó. Xem [Query theo hash — chưa sẵn sàng](#7-query-theo-hash--chưa-sẵn-sàng).
+Với mỗi bản ghi bạn đưa vào, SDK làm ba việc: **chuẩn hoá (canonicalize)**, **băm (hash)** bằng Keccak-256, và **gửi** hash tới dịch vụ Indexer. Sau khi đã được anchor, bản ghi có thể được tra cứu lại theo hash ([§7](#7-query-anchor-theo-hash)) và đối chiếu trực tiếp với blockchain ([§8](#8-xác-minh-anchor-trên-blockchain)).
 
 ---
 
@@ -33,9 +31,13 @@ $sdk = new TracingSDK([
     // URL gốc của Indexer. SDK sẽ tự nối đường dẫn phía sau.
     'endpoint' => 'https://indexer.example.com',
 
-    // Tuỳ chọn mặc định cho mọi lần gọi send()/sendBatch()/hash().
+    // Tuỳ chọn mặc định cho mọi lần gọi send()/sendBatch()/hash()/verify().
     // Có thể bỏ qua nếu mọi lần gọi đều tự truyền SendOptions.
-    'options'  => new SendOptions('json', 5000), // dataType, timeoutMs
+    'options'  => new SendOptions(
+        'json',                      // dataType
+        5000,                        // timeoutMs
+        'https://rpc.example.com'    // rpcUrl — chỉ cần cho verify()
+    ),
 
     // Bắt buộc.
     'auth'     => [
@@ -129,9 +131,9 @@ Việc băm là tất định (deterministic): cùng một bản ghi luôn cho r
 
 ---
 
-## 4. Tuỳ chọn: kiểu dữ liệu & timeout
+## 4. Tuỳ chọn: kiểu dữ liệu, timeout & RPC URL
 
-`SendOptions` là một value object bất biến mang hai thiết lập — `dataType` và `timeoutMs`. Có thể truyền làm mặc định trong config, truyền theo từng lần gọi, hoặc cả hai.
+`SendOptions` là một value object bất biến mang ba thiết lập — `dataType`, `timeoutMs` và `rpcUrl`. Có thể truyền làm mặc định trong config, truyền theo từng lần gọi, hoặc cả hai.
 
 ### 4.1 Kiểu dữ liệu & chuẩn hoá
 
@@ -175,15 +177,34 @@ $sdk->send($rawXml, time(), SendOptions::dataType('xml')->withTimeoutMs(3000));
 
 `timeoutMs` truyền theo lần gọi được ưu tiên hơn giá trị trong config; lần gọi không truyền `timeoutMs` thì giữ nguyên mặc định của config. Khác với `dataType`, `timeoutMs` không bao giờ bắt buộc — bỏ qua ở mọi nơi thì mọi request dùng mặc định 10 giây. Giá trị `0` hoặc âm sẽ ném `ConfigException` ngay lúc tạo `SendOptions`. Khi vượt quá timeout, lỗi được báo dưới dạng `TransportException`.
 
-### 4.3 `SendOptions` là bất biến
+### 4.3 RPC URL
+
+`rpcUrl` là endpoint JSON-RPC của một node blockchain — node của bạn hoặc của nhà cung cấp mà bạn tin cậy. Nó **chỉ** được dùng bởi `verify()` (xem [§8](#8-xác-minh-anchor-trên-blockchain)); việc gửi và băm không bao giờ chạm tới nó, nên có thể bỏ trống nếu bạn không dùng `verify()`.
 
 ```php
-$json = new SendOptions('json');           // tương đương SendOptions::dataType('json')
-$xml  = $json->withDataType('xml');        // trả về bản sao; $json không đổi
-$fast = $json->withTimeoutMs(2000);        // tương tự
+// Đặt làm mặc định cho mọi lần gọi verify().
+$sdk = new TracingSDK([
+    'endpoint' => 'https://indexer.example.com',
+    'options'  => SendOptions::dataType('json')->withRpcUrl('https://rpc.example.com'),
+    'auth'     => ['type' => 'apiToken', 'token' => 'your-api-token'],
+]);
+
+// Chỉ cho một lần gọi.
+$sdk->verify($hash, $txHash, TracingSDK::MODE_TRANSACTION_HASH, SendOptions::rpcUrl('https://other-rpc.example.com'));
 ```
 
-### 4.4 Ví dụ với XML
+`rpcUrl` truyền theo lần gọi được ưu tiên hơn giá trị trong config. Gọi `verify()` mà không có `rpcUrl` ở cả hai nơi sẽ ném `ConfigException`; chuỗi rỗng bị ném lỗi ngay lúc tạo `SendOptions`.
+
+### 4.4 `SendOptions` là bất biến
+
+```php
+$json = new SendOptions('json');                       // tương đương SendOptions::dataType('json')
+$xml  = $json->withDataType('xml');                    // trả về bản sao; $json không đổi
+$fast = $json->withTimeoutMs(2000);                    // tương tự
+$node = $json->withRpcUrl('https://rpc.example.com');  // tương tự
+```
+
+### 4.5 Ví dụ với XML
 
 ```php
 $xml = <<<XML
@@ -234,9 +255,9 @@ Mọi exception của SDK đều kế thừa `Tracing\Sdk\Exception\TracingSdkEx
 
 | Exception | Xảy ra khi |
 | --- | --- |
-| `ConfigException` | Cấu hình thiếu/không hợp lệ, `dataType` hoặc `auth.type` không được hỗ trợ, `timeoutMs` bằng `0` hoặc âm, thiếu `signingTime`, bản ghi trong batch thiếu `rawData`/`signingTime`, `hash` rỗng. |
+| `ConfigException` | Cấu hình thiếu/không hợp lệ, `dataType`, `auth.type` hoặc `mode` của `verify()` không được hỗ trợ, `timeoutMs` bằng `0` hoặc âm, `rpcUrl` rỗng hoặc không có khi verify, thiếu `signingTime`, bản ghi trong batch thiếu `rawData`/`signingTime`, `hash` rỗng, hoặc `dataHash`/`proof` không phải chuỗi hex 32 byte. |
 | `CanonicalizationException` | Không chuẩn hoá được `rawData` theo kiểu dữ liệu đã chọn (ví dụ JSON/XML sai định dạng). |
-| `TransportException` | Request HTTP thất bại (lỗi mạng, hoặc vượt quá `timeoutMs` — mặc định 10 giây), hoặc Indexer trả về status ngoài dải 2xx. |
+| `TransportException` | Request HTTP thất bại (lỗi mạng, hoặc vượt quá `timeoutMs` — mặc định 10 giây), Indexer trả về status ngoài dải 2xx, hoặc node RPC báo lỗi / không biết giao dịch dùng làm proof. |
 
 `ConfigException` và `CanonicalizationException` được ném **trước khi** bất cứ dữ liệu nào rời khỏi tiến trình, nên một lần gọi bị từ chối sẽ không bao giờ gửi được nửa batch.
 
@@ -278,11 +299,9 @@ while (true) {
 
 ---
 
-## 7. Query theo hash — **chưa sẵn sàng**
+## 7. Query anchor theo hash
 
-> **Trạng thái: chưa dùng được.** Endpoint `GET /api/anchors?hash=...` mà phương thức này gọi tới hiện chưa sẵn sàng phía Indexer, vì vậy **chưa được** phụ thuộc vào `queryByHash()` trong code chạy thật. Phương thức và script ví dụ (`example/php/query-example.php`) vẫn được đóng gói kèm để review interface, nhưng gọi nó ở thời điểm hiện tại sẽ thất bại với Indexer thật. Phần dưới mô tả hành vi *dự kiến* và vẫn có thể thay đổi.
-
-Cách dùng dự kiến:
+`queryByHash()` tra cứu hash của một bản ghi để lấy danh sách giao dịch blockchain đã anchor nó, qua `GET {endpoint}/api/anchors?hash=<hash>`. SDK tự URL-encode hash, và áp dụng cấu hình xác thực giống hệt như khi gửi.
 
 ```php
 use Tracing\Sdk\Exception\TransportException;
@@ -295,36 +314,120 @@ try {
         echo $txHash, PHP_EOL;
     }
 } catch (TransportException $e) {
-    // Endpoint chưa sẵn sàng, hash chưa được anchor, hoặc không kết nối được Indexer.
+    // Hash chưa được anchor, hoặc không kết nối được tới Indexer.
     echo $e->getMessage();
 }
 ```
 
-Cấu trúc trả về dự kiến:
+Cấu trúc trả về:
 
 | Khoá | Mô tả |
 | --- | --- |
-| `hash` | Hash của bản ghi đã truy vấn, do Indexer trả lại. |
-| `txHashes` | Danh sách mọi giao dịch blockchain đã anchor bản ghi này. Một bản ghi có thể được anchor nhiều lần, nên hãy luôn duyệt danh sách thay vì giả định chỉ có một phần tử. |
+| `hash` | Hash của bản ghi đã tra cứu, đúng như Indexer trả lại. |
+| `txHashes` | Mọi giao dịch blockchain đã anchor bản ghi. Một bản ghi có thể được anchor nhiều lần, nên hãy luôn lặp qua danh sách thay vì giả định chỉ có một phần tử. |
 
-Lỗi dự kiến: `ConfigException` khi `$hash` rỗng; `TransportException` khi request thất bại, khi status ngoài dải 2xx (bao gồm `404` cho hash chưa từng được anchor), hoặc khi body không phải đối tượng `{ hash, txHashes }`. Hash chưa được anchor sẽ là exception, không phải trả về `null`.
+Lỗi: `ConfigException` khi `$hash` rỗng; `TransportException` khi request thất bại, status ngoài dải 2xx (bao gồm `404` cho hash chưa từng được anchor), hoặc body không phải object `{ hash, txHashes }`. Vì vậy hash chưa được anchor là một exception, không phải giá trị `null` — hãy bọc trong `try`/`catch` nếu "chưa có" là kết quả bình thường với bạn.
 
-**Trong thời gian chờ:** hãy tự lưu `hash` do `send()`/`sendBatch()` trả về. Vì việc băm là tất định, bạn cũng có thể tính lại hash bất cứ lúc nào từ bản ghi gốc bằng `$sdk->hash($rawData)` — không cần truy vấn vẫn đối chiếu được hai giá trị.
+Việc băm là tất định nên cùng một bản ghi luôn cho ra cùng một hash: hãy lưu lại hash mà `send()`/`sendBatch()` trả về, hoặc tính lại bất cứ lúc nào từ bản ghi gốc bằng `$sdk->hash($rawData)`, rồi query khi cần.
 
 ---
 
-## 8. Ví dụ chạy được
+## 8. Xác minh anchor trên blockchain
+
+`queryByHash()` cho bạn biết Indexer *nói* gì. `verify()` đối chiếu lời khẳng định đó với chính blockchain, qua một endpoint RPC do **bạn** chọn — nhờ vậy một Indexer bị chiếm quyền hoặc trả sai không thể tự bảo chứng cho mình.
+
+```php
+use Tracing\Sdk\Exception\TransportException;
+use Tracing\Sdk\SendOptions;
+use Tracing\Sdk\TracingSDK;
+
+$sdk = new TracingSDK([
+    'endpoint' => 'https://indexer.example.com',
+    'options'  => new SendOptions('json', 5000, 'https://rpc.example.com'),
+    'auth'     => ['type' => 'apiToken', 'token' => 'your-api-token'],
+]);
+
+$hash   = $sdk->hash($rawData);            // hoặc hash do send() trả về
+$anchor = $sdk->queryByHash($hash);        // ['hash' => …, 'txHashes' => [...]]
+
+foreach ($anchor['txHashes'] as $txHash) {
+    if ($sdk->verify($hash, $txHash)) {
+        echo "đã được anchor trên chain trong {$txHash}", PHP_EOL;
+        break;
+    }
+}
+```
+
+### Cách hoạt động
+
+1. Gọi `eth_getTransactionReceipt` với hash giao dịch proof tới `rpcUrl` đã cấu hình — chỉ là một POST JSON-RPC 2.0 thuần, không gắn kèm thông tin xác thực của Indexer.
+2. Duyệt các log trong receipt và giữ lại những log có `topics[0]` bằng `keccak256("Anchored(bytes32,uint64)")`.
+3. ABI-decode từng log đó theo `Anchored(bytes32 dataHash, uint64 signingTime)`.
+4. Trả về `true` ngay khi có một `dataHash` giải mã được trùng với hash bạn truyền vào, `false` nếu không có log nào trùng.
+
+Cả hai cách khai báo event đều giải mã được: `bytes32` có `indexed` được đọc từ `topics[1]`, không `indexed` thì đọc từ phần data của log. Việc so sánh dùng hash đã chuẩn hoá, nên chữ hoa/thường hay thiếu tiền tố `0x` không ảnh hưởng. Log của các event khác trong cùng giao dịch bị bỏ qua.
+
+### Chữ ký hàm
+
+```php
+verify(
+    string $dataHash,                                  // hash của bản ghi
+    string $proof,                                     // bằng chứng trên chain
+    string $mode = TracingSDK::MODE_TRANSACTION_HASH,   // cách hiểu proof
+    ?SendOptions $options = null                        // rpcUrl / timeoutMs theo lần gọi
+): bool
+```
+
+| Tham số | Mô tả |
+| --- | --- |
+| `$dataHash` | Hash Keccak-256 của bản ghi — từ `hash()`, `send()`, hoặc `queryByHash()`. Phải là chuỗi hex 32 byte. |
+| `$proof` | Bằng chứng trên chain để đối chiếu. Với mode hiện tại, đây là một hash giao dịch, ví dụ một phần tử trong `txHashes` của `queryByHash()`. |
+| `$mode` | Cách hiểu `$proof`. Hiện chỉ có `TracingSDK::MODE_TRANSACTION_HASH` (`'transactionHash'`); tham số này tồn tại để sau này thêm loại bằng chứng khác mà không phải đổi chữ ký hàm. Giá trị khác sẽ ném `ConfigException`. |
+| `$options` | `rpcUrl` và `timeoutMs` cho riêng lần gọi này. Nếu không truyền thì lấy từ `options` trong config. |
+
+### `true`, `false`, hay exception
+
+| Kết quả | Ý nghĩa |
+| --- | --- |
+| `true` | Giao dịch thực sự chứa event `Anchored` mang đúng data hash này. |
+| `false` | Giao dịch tồn tại, nhưng không có event `Anchored` nào trong đó mang hash này — bản ghi không được anchor bởi giao dịch này. |
+| `ConfigException` | Sai đầu vào hoặc cấu hình: `dataHash`/`proof` sai định dạng, `$mode` không được hỗ trợ, hoặc không có `rpcUrl` ở đâu cả. |
+| `TransportException` | Không kết nối được endpoint RPC, endpoint trả về status ngoài dải 2xx hoặc lỗi JSON-RPC, hoặc node không biết giao dịch (hash chưa được mine, đã bị drop, hoặc thuộc chain khác — node trả receipt `null`). |
+
+`false` là câu trả lời thật về một giao dịch thật; còn giao dịch không tồn tại là exception, vì "node chưa từng thấy nó" không nói lên được bản ghi đã được anchor hay chưa.
+
+```php
+try {
+    $verified = $sdk->verify($hash, $txHash);
+} catch (TransportException $e) {
+    // RPC không truy cập được, hoặc giao dịch chưa được mine — hãy thử lại sau,
+    // đừng coi đây là "chưa được anchor".
+    $verified = null;
+}
+```
+
+### Lưu ý
+
+- Hãy chọn node RPC trên đúng chain mà Indexer anchor lên; một node khoẻ nhưng sai chain đơn giản là không biết giao dịch đó, và lỗi sẽ hiện ra dưới dạng `TransportException`.
+- Dùng node có đủ dữ liệu lịch sử cho block cần kiểm tra. Một số endpoint công khai xoá bớt (prune) receipt cũ.
+- `timeoutMs` áp dụng cho request RPC giống như với request tới Indexer, mặc định 10 000 ms.
+- `rpcUrl` có thể chứa API key của nhà cung cấp; nó chỉ được gửi tới URL đó, không bao giờ gửi tới Indexer.
+
+---
+
+## 9. Ví dụ chạy được
 
 Thư mục `example/php/` chứa các script hoàn chỉnh:
 
 | File | Minh hoạ |
 | --- | --- |
-| [`single-send-example.php`](../example/php/single-send-example.php) | Gửi một bản ghi JSON bằng `send()` |
-| [`example.php`](../example/php/example.php) | Gửi nhiều bản ghi JSON trong một request bằng `sendBatch()` |
+| [`single-send-example.php`](../example/php/single-send-example.php) | Một bản ghi JSON với `send()` |
+| [`example.php`](../example/php/example.php) | Nhiều bản ghi JSON trong một request với `sendBatch()` |
 | [`xml-example.php`](../example/php/xml-example.php) | Luồng batch với `SendOptions::dataType('xml')` |
-| [`query-example.php`](../example/php/query-example.php) | `queryByHash()` — **endpoint chưa sẵn sàng**, xem mục 7 |
+| [`query-example.php`](../example/php/query-example.php) | Gửi một bản ghi rồi tra cứu anchor bằng `queryByHash()` |
+| [`verify-example.php`](../example/php/verify-example.php) | Query rồi `verify()` từng giao dịch proof với node RPC |
 
-Mỗi script trỏ tới `http://localhost:3000` với API token giả — sửa `endpoint` và `auth` ở đầu file cho khớp Indexer của bạn, rồi chạy:
+Mỗi script trỏ tới `http://localhost:3000` với token giả — sửa `endpoint` và `auth` ở đầu file (thêm `rpcUrl` với ví dụ verify), rồi chạy:
 
 ```bash
 composer install
@@ -333,7 +436,7 @@ php example/php/single-send-example.php
 
 ---
 
-## 9. Tham chiếu API
+## 10. Tham chiếu API
 
 ```php
 new TracingSDK(array $config)
@@ -345,22 +448,30 @@ sendBatch(array $records, ?SendOptions $options = null): array
     // [['hash' => string, 'response' => [...]], ...] — một phần tử cho mỗi bản ghi đầu vào
 
 hash(string $rawData, ?SendOptions $options = null): string
-    // chuỗi hex Keccak-256 dạng '0x…'
+    // '0x…' hex Keccak-256
 
-queryByHash(string $hash, ?SendOptions $options = null): array   // CHƯA SẴN SÀNG — xem mục 7
+queryByHash(string $hash, ?SendOptions $options = null): array
     // ['hash' => string, 'txHashes' => string[]]
+
+verify(string $dataHash, string $proof, string $mode = TracingSDK::MODE_TRANSACTION_HASH, ?SendOptions $options = null): bool
+    // true khi log của $proof chứa Anchored(bytes32,uint64) với $dataHash
+
+TracingSDK::MODE_TRANSACTION_HASH   // 'transactionHash' — mode verify duy nhất hiện nay
 ```
 
 `SendOptions`:
 
 ```php
-new SendOptions(?string $dataType = null, ?int $timeoutMs = null)
+new SendOptions(?string $dataType = null, ?int $timeoutMs = null, ?string $rpcUrl = null)
 SendOptions::dataType(string $dataType): SendOptions
 SendOptions::timeoutMs(int $timeoutMs): SendOptions
+SendOptions::rpcUrl(string $rpcUrl): SendOptions
 $options->getDataType(): ?string
 $options->getTimeoutMs(): ?int
+$options->getRpcUrl(): ?string
 $options->withDataType(?string $dataType): SendOptions   // trả về bản sao
-$options->withTimeoutMs(?int $timeoutMs): SendOptions    // trả về bản sao
+$options->withTimeoutMs(?int $timeoutMs): SendOptions     // trả về bản sao
+$options->withRpcUrl(?string $rpcUrl): SendOptions        // trả về bản sao
 ```
 
-Các endpoint HTTP được sử dụng: `POST /api/anchors`, `POST /api/anchors/batch`, và (khi sẵn sàng) `GET /api/anchors?hash=…`. Timeout của request lấy theo `timeoutMs`, mặc định là `CurlHttpTransport::DEFAULT_TIMEOUT_MS` (10 000 ms).
+Các endpoint Indexer được dùng: `POST /api/anchors`, `POST /api/anchors/batch`, `GET /api/anchors?hash=…`. Ngoài ra `verify()` gọi `eth_getTransactionReceipt` trên `rpcUrl`. Timeout của request là `timeoutMs`, mặc định `CurlHttpTransport::DEFAULT_TIMEOUT_MS` (10 000 ms).

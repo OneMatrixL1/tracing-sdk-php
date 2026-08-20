@@ -2,9 +2,7 @@
 
 > 🇻🇳 Bản tiếng Việt: [USAGE.vi.md](USAGE.vi.md)
 
-The SDK does three things for every record you hand it: **canonicalize** it, **hash** it with Keccak-256, and **send** the hash to an Indexer service.
-
-> **Query by hash is not ready yet.** `queryByHash()` exists in the code, but the Indexer endpoint it depends on (`GET /api/anchors?hash=...`) is not available for use — do not build on it yet. See [Query by hash — not ready](#7-query-by-hash--not-ready-yet).
+The SDK does three things for every record you hand it: **canonicalize** it, **hash** it with Keccak-256, and **send** the hash to an Indexer service. Once anchored, a record can be looked up by its hash ([§7](#7-querying-an-anchor-by-hash)) and checked against the chain itself ([§8](#8-verifying-an-anchor-against-the-chain)).
 
 ---
 
@@ -33,9 +31,13 @@ $sdk = new TracingSDK([
     // Base URL of your Indexer. Paths are appended by the SDK.
     'endpoint' => 'https://indexer.example.com',
 
-    // Default options for every send()/sendBatch()/hash() call. Optional
-    // if every call passes its own SendOptions.
-    'options'  => new SendOptions('json', 5000), // dataType, timeoutMs
+    // Default options for every send()/sendBatch()/hash()/verify() call.
+    // Optional if every call passes its own SendOptions.
+    'options'  => new SendOptions(
+        'json',                      // dataType
+        5000,                        // timeoutMs
+        'https://rpc.example.com'    // rpcUrl — only needed for verify()
+    ),
 
     // Required.
     'auth'     => [
@@ -129,9 +131,9 @@ Hashing is deterministic: the same record always produces the same hash, on any 
 
 ---
 
-## 4. Options: data type & timeout
+## 4. Options: data type, timeout & RPC URL
 
-`SendOptions` is an immutable value object carrying two settings — `dataType` and `timeoutMs`. It can be given as the config default, per call, or both.
+`SendOptions` is an immutable value object carrying three settings — `dataType`, `timeoutMs`, and `rpcUrl`. It can be given as the config default, per call, or both.
 
 ### 4.1 Data types & canonicalization
 
@@ -175,15 +177,34 @@ $sdk->send($rawXml, time(), SendOptions::dataType('xml')->withTimeoutMs(3000));
 
 A per-call `timeoutMs` wins over the config one; a call that supplies no `timeoutMs` keeps the config default. Unlike `dataType`, a timeout is never required — omit it everywhere and every request uses the 10 s default. A value of `0` or less throws `ConfigException`, raised when the `SendOptions` is built. Exceeding the timeout surfaces as `TransportException`.
 
-### 4.3 `SendOptions` is immutable
+### 4.3 RPC URL
+
+`rpcUrl` is the JSON-RPC endpoint of a chain node — an archive/full node you trust, your own or a provider's. It is used **only** by `verify()` (see [§8](#8-verifying-an-anchor-against-the-chain)); sending and hashing never touch it, so leave it unset if you never verify.
 
 ```php
-$json = new SendOptions('json');           // same as SendOptions::dataType('json')
-$xml  = $json->withDataType('xml');        // returns a copy; $json is unchanged
-$fast = $json->withTimeoutMs(2000);        // likewise
+// As the default for every verify() call.
+$sdk = new TracingSDK([
+    'endpoint' => 'https://indexer.example.com',
+    'options'  => SendOptions::dataType('json')->withRpcUrl('https://rpc.example.com'),
+    'auth'     => ['type' => 'apiToken', 'token' => 'your-api-token'],
+]);
+
+// For one call only.
+$sdk->verify($hash, $txHash, TracingSDK::MODE_TRANSACTION_HASH, SendOptions::rpcUrl('https://other-rpc.example.com'));
 ```
 
-### 4.4 XML example
+A per-call `rpcUrl` wins over the config one. Calling `verify()` with neither throws `ConfigException`; an empty string throws when the `SendOptions` is built.
+
+### 4.4 `SendOptions` is immutable
+
+```php
+$json = new SendOptions('json');                       // same as SendOptions::dataType('json')
+$xml  = $json->withDataType('xml');                    // returns a copy; $json is unchanged
+$fast = $json->withTimeoutMs(2000);                    // likewise
+$node = $json->withRpcUrl('https://rpc.example.com');  // likewise
+```
+
+### 4.5 XML example
 
 ```php
 $xml = <<<XML
@@ -234,9 +255,9 @@ All SDK exceptions extend `Tracing\Sdk\Exception\TracingSdkException` (itself a 
 
 | Exception | Raised when |
 | --- | --- |
-| `ConfigException` | Missing/invalid config, unsupported `dataType` or `auth.type`, a `timeoutMs` of `0` or less, missing `signingTime`, a batch record without `rawData`/`signingTime`, empty `hash`. |
+| `ConfigException` | Missing/invalid config, unsupported `dataType`, `auth.type` or `verify()` mode, a `timeoutMs` of `0` or less, an empty `rpcUrl` or none at all when verifying, missing `signingTime`, a batch record without `rawData`/`signingTime`, empty `hash`, or a `dataHash`/`proof` that is not a 32-byte hex string. |
 | `CanonicalizationException` | `rawData` cannot be canonicalized for the chosen data type (e.g. malformed JSON/XML). |
-| `TransportException` | The HTTP request failed (network, or it exceeded `timeoutMs` — 10 s by default), or the Indexer answered with a non-2xx status. |
+| `TransportException` | The HTTP request failed (network, or it exceeded `timeoutMs` — 10 s by default), the Indexer answered with a non-2xx status, or the RPC node rejected the call / does not know the proof transaction. |
 
 `ConfigException` and `CanonicalizationException` are raised **before** anything leaves the process, so a rejected call never half-sends a batch.
 
@@ -278,11 +299,9 @@ while (true) {
 
 ---
 
-## 7. Query by hash — **not ready yet**
+## 7. Querying an anchor by hash
 
-> **Status: not available.** The `GET /api/anchors?hash=...` endpoint this method calls is not ready on the Indexer side, so `queryByHash()` must not be relied upon in production code yet. The method and the example script (`example/php/query-example.php`) are shipped so the interface can be reviewed, but calling it today will fail against a live Indexer. This section documents the *intended* behaviour and may still change.
-
-Planned usage:
+`queryByHash()` resolves a record's hash to the blockchain transactions that anchored it, via `GET {endpoint}/api/anchors?hash=<hash>`. The hash is URL-encoded for you, and the configured auth is applied exactly as it is for sending.
 
 ```php
 use Tracing\Sdk\Exception\TransportException;
@@ -295,25 +314,107 @@ try {
         echo $txHash, PHP_EOL;
     }
 } catch (TransportException $e) {
-    // Endpoint unavailable, hash not anchored, or the Indexer was unreachable.
+    // Hash not anchored, or the Indexer was unreachable.
     echo $e->getMessage();
 }
 ```
 
-Planned return shape:
+Return shape:
 
 | Key | Description |
 | --- | --- |
 | `hash` | The record hash queried, as echoed back by the Indexer. |
 | `txHashes` | Every blockchain transaction the record was anchored in. A record can be anchored more than once, so always iterate rather than assuming a single element. |
 
-Planned errors: `ConfigException` for an empty `$hash`; `TransportException` for a failed request, a non-2xx status (including the `404` for a hash that was never anchored), or a body that is not a `{ hash, txHashes }` object. A not-yet-anchored hash is an exception, not a `null` return.
+Errors: `ConfigException` for an empty `$hash`; `TransportException` for a failed request, a non-2xx status (including the `404` for a hash that was never anchored), or a body that is not a `{ hash, txHashes }` object. A not-yet-anchored hash is therefore an exception, not a `null` return — wrap the call in `try`/`catch` when "not there yet" is a normal outcome for you.
 
-**In the meantime:** keep the `hash` returned by `send()`/`sendBatch()` in your own storage. Hashing is deterministic, so you can also re-derive it at any time from the original record with `$sdk->hash($rawData)` — no lookup needed to prove the two match.
+Hashing is deterministic, so the same record always yields the same hash: keep the one returned by `send()`/`sendBatch()`, or re-derive it at any time from the original record with `$sdk->hash($rawData)`, and query it whenever you need to.
 
 ---
 
-## 8. Runnable examples
+## 8. Verifying an anchor against the chain
+
+`queryByHash()` tells you what the Indexer says. `verify()` checks that claim against the chain itself, over an RPC endpoint **you** choose — so a compromised or mistaken Indexer cannot vouch for itself.
+
+```php
+use Tracing\Sdk\Exception\TransportException;
+use Tracing\Sdk\SendOptions;
+use Tracing\Sdk\TracingSDK;
+
+$sdk = new TracingSDK([
+    'endpoint' => 'https://indexer.example.com',
+    'options'  => new SendOptions('json', 5000, 'https://rpc.example.com'),
+    'auth'     => ['type' => 'apiToken', 'token' => 'your-api-token'],
+]);
+
+$hash   = $sdk->hash($rawData);            // or the hash returned by send()
+$anchor = $sdk->queryByHash($hash);        // ['hash' => …, 'txHashes' => [...]]
+
+foreach ($anchor['txHashes'] as $txHash) {
+    if ($sdk->verify($hash, $txHash)) {
+        echo "anchored on chain in {$txHash}", PHP_EOL;
+        break;
+    }
+}
+```
+
+### What it does
+
+1. Calls `eth_getTransactionReceipt` with the proof transaction hash on the configured `rpcUrl` — a plain JSON-RPC 2.0 POST, with no Indexer auth attached.
+2. Walks the receipt's logs and keeps the ones whose `topics[0]` equals `keccak256("Anchored(bytes32,uint64)")`.
+3. ABI-decodes each of those as `Anchored(bytes32 dataHash, uint64 signingTime)`.
+4. Returns `true` as soon as one decoded `dataHash` equals the hash you passed, `false` if none does.
+
+Both event layouts decode: an indexed `bytes32` is read from `topics[1]`, a non-indexed one from the log data. Comparison is on normalized hashes, so case and a missing `0x` prefix do not matter. Logs from other events in the same transaction are ignored.
+
+### Signature
+
+```php
+verify(
+    string $dataHash,                                  // the record hash
+    string $proof,                                     // the on-chain proof
+    string $mode = TracingSDK::MODE_TRANSACTION_HASH,   // how to resolve the proof
+    ?SendOptions $options = null                        // per-call rpcUrl / timeoutMs
+): bool
+```
+
+| Parameter | Description |
+| --- | --- |
+| `$dataHash` | The record's Keccak-256 hash — from `hash()`, `send()`, or `queryByHash()`. Must be 32 bytes of hex. |
+| `$proof` | The on-chain evidence to check the hash against. With the current mode this is a transaction hash, e.g. one element of `queryByHash()`'s `txHashes`. |
+| `$mode` | How `$proof` should be interpreted. Only `TracingSDK::MODE_TRANSACTION_HASH` (`'transactionHash'`) exists today; the parameter is there so other proof kinds can be added without breaking the signature. Anything else throws `ConfigException`. |
+| `$options` | Per-call `rpcUrl` and `timeoutMs`. Falls back to the config `options`. |
+
+### `true`, `false`, or an exception
+
+| Outcome | Meaning |
+| --- | --- |
+| `true` | The transaction really does contain an `Anchored` event carrying this data hash. |
+| `false` | The transaction exists, but no `Anchored` event in it carries this hash — the record was not anchored by this transaction. |
+| `ConfigException` | Bad input or config: malformed `dataHash`/`proof`, unsupported `$mode`, or no `rpcUrl` anywhere. |
+| `TransportException` | The RPC endpoint was unreachable, returned a non-2xx status or a JSON-RPC error, or does not know the transaction (an unmined, dropped, or wrong-chain hash — the node returns a `null` receipt). |
+
+A `false` is a real answer about a real transaction; a missing transaction is an exception, because "the node has never heard of it" says nothing about whether the record was anchored.
+
+```php
+try {
+    $verified = $sdk->verify($hash, $txHash);
+} catch (TransportException $e) {
+    // RPC unreachable, or the tx is not mined yet — retry later, don't treat as "not anchored".
+    $verified = null;
+}
+```
+
+### Notes
+
+- Pick an RPC node on the same chain the Indexer anchors to; a healthy node on the wrong chain simply does not know the transaction, which surfaces as `TransportException`.
+- Use a node with enough history for the block you are checking. Some public endpoints prune old receipts.
+- `timeoutMs` applies to the RPC request the same way it does to Indexer requests, defaulting to 10 000 ms.
+- `rpcUrl` may embed a provider API key; it is sent to that URL only, never to the Indexer.
+
+---
+
+## 9. Runnable examples
 
 `example/php/` contains complete scripts:
 
@@ -322,9 +423,10 @@ Planned errors: `ConfigException` for an empty `$hash`; `TransportException` for
 | [`single-send-example.php`](../example/php/single-send-example.php) | One JSON record with `send()` |
 | [`example.php`](../example/php/example.php) | Several JSON records in one request with `sendBatch()` |
 | [`xml-example.php`](../example/php/xml-example.php) | The batch flow with `SendOptions::dataType('xml')` |
-| [`query-example.php`](../example/php/query-example.php) | `queryByHash()` — **endpoint not ready yet**, see §7 |
+| [`query-example.php`](../example/php/query-example.php) | Sending a record, then looking the anchor up with `queryByHash()` |
+| [`verify-example.php`](../example/php/verify-example.php) | Query, then `verify()` each proof transaction against an RPC node |
 
-Each script points at `http://localhost:3000` with a placeholder token — edit `endpoint` and `auth` at the top, then run:
+Each script points at `http://localhost:3000` with a placeholder token — edit `endpoint` and `auth` at the top (plus `rpcUrl` for the verify example), then run:
 
 ```bash
 composer install
@@ -333,7 +435,7 @@ php example/php/single-send-example.php
 
 ---
 
-## 9. API reference
+## 10. API reference
 
 ```php
 new TracingSDK(array $config)
@@ -347,20 +449,28 @@ sendBatch(array $records, ?SendOptions $options = null): array
 hash(string $rawData, ?SendOptions $options = null): string
     // '0x…' Keccak-256 hex
 
-queryByHash(string $hash, ?SendOptions $options = null): array   // NOT READY — see §7
+queryByHash(string $hash, ?SendOptions $options = null): array
     // ['hash' => string, 'txHashes' => string[]]
+
+verify(string $dataHash, string $proof, string $mode = TracingSDK::MODE_TRANSACTION_HASH, ?SendOptions $options = null): bool
+    // true when $proof's logs contain Anchored(bytes32,uint64) with $dataHash
+
+TracingSDK::MODE_TRANSACTION_HASH   // 'transactionHash' — the only verify mode today
 ```
 
 `SendOptions`:
 
 ```php
-new SendOptions(?string $dataType = null, ?int $timeoutMs = null)
+new SendOptions(?string $dataType = null, ?int $timeoutMs = null, ?string $rpcUrl = null)
 SendOptions::dataType(string $dataType): SendOptions
 SendOptions::timeoutMs(int $timeoutMs): SendOptions
+SendOptions::rpcUrl(string $rpcUrl): SendOptions
 $options->getDataType(): ?string
 $options->getTimeoutMs(): ?int
+$options->getRpcUrl(): ?string
 $options->withDataType(?string $dataType): SendOptions   // returns a copy
-$options->withTimeoutMs(?int $timeoutMs): SendOptions    // returns a copy
+$options->withTimeoutMs(?int $timeoutMs): SendOptions     // returns a copy
+$options->withRpcUrl(?string $rpcUrl): SendOptions        // returns a copy
 ```
 
-HTTP endpoints used: `POST /api/anchors`, `POST /api/anchors/batch`, and (once ready) `GET /api/anchors?hash=…`. Request timeout is `timeoutMs`, defaulting to `CurlHttpTransport::DEFAULT_TIMEOUT_MS` (10 000 ms).
+Indexer endpoints used: `POST /api/anchors`, `POST /api/anchors/batch`, `GET /api/anchors?hash=…`. `verify()` additionally calls `eth_getTransactionReceipt` on `rpcUrl`. Request timeout is `timeoutMs`, defaulting to `CurlHttpTransport::DEFAULT_TIMEOUT_MS` (10 000 ms).

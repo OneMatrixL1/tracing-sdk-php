@@ -16,8 +16,11 @@ use Tracing\Sdk\Exception\ConfigException;
 use Tracing\Sdk\Exception\TransportException;
 use Tracing\Sdk\Hash\HasherInterface;
 use Tracing\Sdk\Hash\Keccak256Hasher;
+use Tracing\Sdk\Rpc\CurlRpcTransport;
+use Tracing\Sdk\Rpc\RpcTransportInterface;
 use Tracing\Sdk\Transport\CurlHttpTransport;
 use Tracing\Sdk\Transport\HttpTransportInterface;
+use Tracing\Sdk\Verify\AnchoredEventDecoder;
 
 /**
  * Canonicalizes a record, hashes it with Keccak-256, and sends the resulting
@@ -28,6 +31,13 @@ class TracingSDK
     public const DATA_TYPE_JSON = 'json';
     public const DATA_TYPE_XML = 'xml';
     public const DATA_TYPE_RAW = 'raw';
+
+    /**
+     * verify() modes — how the proof it is handed should be resolved on chain.
+     * Only transaction hashes are supported for now; the parameter exists so
+     * other proof kinds can be added without changing the signature.
+     */
+    public const MODE_TRANSACTION_HASH = 'transactionHash';
 
     /** @var array<string, CanonicalizerInterface> */
     private $canonicalizers = [];
@@ -40,6 +50,12 @@ class TracingSDK
 
     /** @var HttpTransportInterface */
     private $transport;
+
+    /** @var RpcTransportInterface */
+    private $rpcTransport;
+
+    /** @var AnchoredEventDecoder */
+    private $eventDecoder;
 
     /**
      * @param array{endpoint: string, auth: array, options?: SendOptions} $config
@@ -62,10 +78,14 @@ class TracingSDK
         }
 
         $this->hasher = new Keccak256Hasher();
+        $this->eventDecoder = new AnchoredEventDecoder($this->hasher);
         $this->transport = new CurlHttpTransport(
             (string) $config['endpoint'],
             $this->createAuthenticator($config['auth']),
             $this->defaultOptions->getTimeoutMs() ?? CurlHttpTransport::DEFAULT_TIMEOUT_MS
+        );
+        $this->rpcTransport = new CurlRpcTransport(
+            $this->defaultOptions->getTimeoutMs() ?? CurlRpcTransport::DEFAULT_TIMEOUT_MS
         );
     }
 
@@ -187,6 +207,69 @@ class TracingSDK
     }
 
     /**
+     * Check a query result against the chain itself: fetch the proof's
+     * transaction logs from the configured JSON-RPC endpoint, ABI-decode the
+     * ones emitted as Anchored(bytes32,uint64), and report whether one of them
+     * carries exactly this data hash.
+     *
+     * A log matches when its topics[0] equals keccak256 of the event
+     * signature and its decoded bytes32 argument equals $dataHash. The
+     * bytes32 is read from topics[1] when the argument is indexed and from
+     * the log data otherwise, so both layouts verify.
+     *
+     * @param string $dataHash the record hash, as returned by hash()/send()
+     * @param string $proof the on-chain proof to check the hash against; with
+     *        MODE_TRANSACTION_HASH this is one of the txHashes from queryByHash()
+     * @param string $mode one of the self::MODE_* constants
+     * @param SendOptions|null $options per-call overrides; falls back to config.
+     *        An rpcUrl must be given here or in the config "options".
+     * @return bool true when the transaction anchored this data hash
+     * @throws ConfigException if dataHash or proof is empty or malformed, the
+     *         mode is unsupported, or no rpcUrl is given here or in config
+     * @throws TransportException if the RPC call fails or the node does not
+     *         know the transaction
+     */
+    public function verify(
+        string $dataHash,
+        string $proof,
+        string $mode = self::MODE_TRANSACTION_HASH,
+        ?SendOptions $options = null
+    ): bool {
+        if ($mode !== self::MODE_TRANSACTION_HASH) {
+            throw new ConfigException(\sprintf(
+                'Unsupported verify mode "%s", expected "%s"',
+                $mode,
+                self::MODE_TRANSACTION_HASH
+            ));
+        }
+
+        $dataHash = AnchoredEventDecoder::normalizeHash($dataHash, 'dataHash');
+        $txHash = AnchoredEventDecoder::normalizeHash($proof, 'proof');
+
+        $receipt = $this->rpcTransport->getTransactionReceipt(
+            $this->rpcUrlFor($options),
+            $txHash,
+            $this->timeoutMsFor($options)
+        );
+
+        if ($receipt === null) {
+            throw new TransportException(\sprintf('Transaction %s was not found on the RPC endpoint', $txHash));
+        }
+
+        $logs = isset($receipt['logs']) && \is_array($receipt['logs']) ? $receipt['logs'] : [];
+
+        foreach ($logs as $log) {
+            $event = $this->eventDecoder->decode($log);
+
+            if ($event !== null && $event['dataHash'] === $dataHash) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Swap the transport for a test double. Not part of the SDK's public
      * contract — for unit tests only, so specs can run without a live
      * Indexer endpoint.
@@ -194,6 +277,33 @@ class TracingSDK
     public function setTransportForTesting(HttpTransportInterface $transport): void
     {
         $this->transport = $transport;
+    }
+
+    /**
+     * Swap the JSON-RPC transport for a test double. Test-only, like
+     * setTransportForTesting().
+     */
+    public function setRpcTransportForTesting(RpcTransportInterface $rpcTransport): void
+    {
+        $this->rpcTransport = $rpcTransport;
+    }
+
+    /**
+     * Resolve the JSON-RPC endpoint for this call: the per-call rpcUrl when
+     * one was given, otherwise the config default.
+     *
+     * @throws ConfigException if neither supplies one
+     */
+    private function rpcUrlFor(?SendOptions $options): string
+    {
+        $rpcUrl = $options !== null ? $options->getRpcUrl() : null;
+        $rpcUrl = $rpcUrl !== null ? $rpcUrl : $this->defaultOptions->getRpcUrl();
+
+        if ($rpcUrl === null) {
+            throw new ConfigException('rpcUrl is required to verify, either in the config "options" or per call');
+        }
+
+        return $rpcUrl;
     }
 
     /**
