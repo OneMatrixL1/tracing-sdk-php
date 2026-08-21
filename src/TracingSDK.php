@@ -173,10 +173,12 @@ class TracingSDK
      *
      * @param string $hash
      * @param SendOptions|null $options per-call overrides; falls back to config
-     * @return array{hash: string, txHashes: array<int, string>}
+     * @return array{hash: string, proof: array<int, string>, proofType: string}
+     *         proofType names how each proof should be resolved on chain and
+     *         can be passed straight to verify() as its $mode
      * @throws TransportException if the request fails,
      *         the Indexer returns a non-2xx status, or the response body is
-     *         not the expected { hash, txHashes } object
+     *         not the expected { hash, proof } object
      * @throws ConfigException if hash is empty
      */
     public function queryByHash(string $hash, ?SendOptions $options = null): array
@@ -193,17 +195,25 @@ class TracingSDK
 
         $body = $response['body'];
 
-        if (!\is_array($body) || !isset($body['hash']) || !isset($body['txHashes']) || !\is_array($body['txHashes'])) {
-            throw new TransportException('Unexpected response body for query by hash, expected { hash, txHashes }');
+        if (!\is_array($body) || !isset($body['hash']) || !isset($body['proof']) || !\is_array($body['proof'])) {
+            throw new TransportException('Unexpected response body for query by hash, expected { hash, proof }');
         }
 
-        $txHashes = [];
+        $proofs = [];
 
-        foreach ($body['txHashes'] as $txHash) {
-            $txHashes[] = (string) $txHash;
+        foreach ($body['proof'] as $element) {
+            $proofs[] = (string) $element;
         }
 
-        return ['hash' => (string) $body['hash'], 'txHashes' => $txHashes];
+        return [
+            'hash' => (string) $body['hash'],
+            'proof' => $proofs,
+            // Older Indexers answer without a proofType; transaction hashes
+            // were the only proof kind then, so that is the safe assumption.
+            'proofType' => isset($body['proofType'])
+                ? (string) $body['proofType']
+                : self::MODE_TRANSACTION_HASH,
+        ];
     }
 
     /**
@@ -219,7 +229,7 @@ class TracingSDK
      *
      * @param string $dataHash the record hash, as returned by hash()/send()
      * @param string $proof the on-chain proof to check the hash against; with
-     *        MODE_TRANSACTION_HASH this is one of the txHashes from queryByHash()
+     *        MODE_TRANSACTION_HASH this is one of the proofs from queryByHash()
      * @param string $mode one of the self::MODE_* constants
      * @param SendOptions|null $options per-call overrides; falls back to config.
      *        An rpcUrl must be given here or in the config "options".

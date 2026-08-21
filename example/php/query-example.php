@@ -25,13 +25,15 @@ try {
     // Hashing is deterministic, so you can also query a hash you stored
     // earlier — or re-derived from the original record — without sending again.
     // A record can be anchored more than once, so the lookup returns every
-    // transaction the hash appears in.
+    // proof the hash appears in, plus the proofType telling you how to resolve
+    // them on chain (pass it straight to verify()).
     $anchor = $sdk->queryByHash($result['hash']);
     printf(
-        "[found] %s anchored in %d tx: %s\n",
+        "[found] %s anchored by %d %s proof: %s\n",
         $anchor['hash'],
-        count($anchor['txHashes']),
-        implode(', ', $anchor['txHashes'])
+        count($anchor['proof']),
+        $anchor['proofType'],
+        implode(', ', $anchor['proof'])
     );
 } catch (\Throwable $e) {
     fwrite(STDERR, '[error] ' . $e->getMessage() . "\n");

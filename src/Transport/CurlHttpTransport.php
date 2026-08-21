@@ -51,7 +51,8 @@ class CurlHttpTransport implements HttpTransportInterface
 
     /**
      * GET /api/anchors?hash=... — the Indexer responds with
-     * { "hash": "<hash hex>", "txHashes": ["<tx hash hex>", ...] }.
+     * { "hash": "<hash hex>", "proof": ["<proof hex>", ...],
+     *   "proofType": "transactionHash" }.
      */
     public function queryByHash(string $hash, ?int $timeoutMs = null): array
     {

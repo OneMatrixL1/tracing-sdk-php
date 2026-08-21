@@ -28,14 +28,14 @@ try {
 
     // What the Indexer claims: the transactions this hash was anchored in.
     $anchor = $sdk->queryByHash($result['hash']);
-    printf("[found] %d tx: %s\n", count($anchor['txHashes']), implode(', ', $anchor['txHashes']));
+    printf("[found] %d tx: %s\n", count($anchor['proof']), implode(', ', $anchor['proof']));
 
     // What the chain says. verify() reads the transaction receipt over RPC and
     // looks for an Anchored(bytes32,uint64) log carrying this exact hash, so a
     // wrong or dishonest Indexer answer cannot pass.
-    foreach ($anchor['txHashes'] as $txHash) {
-        $verified = $sdk->verify($anchor['hash'], $txHash, TracingSDK::MODE_TRANSACTION_HASH);
-        printf("[verify] %s -> %s\n", $txHash, $verified ? 'VERIFIED' : 'no matching anchor event');
+    foreach ($anchor['proof'] as $proof) {
+        $verified = $sdk->verify($anchor['hash'], $proof, $anchor['proofType']);
+        printf("[verify] %s -> %s\n", $proof, $verified ? 'VERIFIED' : 'no matching anchor event');
     }
 } catch (\Throwable $e) {
     // A TransportException here can also mean the transaction is not mined yet,

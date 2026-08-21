@@ -322,7 +322,7 @@ class TracingSDKTest extends TestCase
         $sdk->sendBatch([['rawData' => '{"a":1}', 'signingTime' => 1]]);
     }
 
-    public function testQueryByHashReturnsHashAndEveryTxHash(): void
+    public function testQueryByHashReturnsHashAndEveryProof(): void
     {
         $sdk = $this->makeSdk();
         $transport = new FakeTransport();
@@ -330,25 +330,46 @@ class TracingSDKTest extends TestCase
 
         $result = $sdk->queryByHash('0xdeadbeef');
 
-        $this->assertSame(['hash' => '0xdeadbeef', 'txHashes' => ['0xabc', '0xdef']], $result);
+        $this->assertSame(
+            ['hash' => '0xdeadbeef', 'proof' => ['0xabc', '0xdef'], 'proofType' => 'transactionHash'],
+            $result
+        );
         $this->assertSame(['0xdeadbeef'], $transport->queryCalls);
     }
 
-    public function testQueryByHashReturnsEmptyTxHashesWhenIndexerReportsNone(): void
+    public function testQueryByHashReturnsEmptyProofWhenIndexerReportsNone(): void
     {
         $sdk = $this->makeSdk();
         $transport = new FakeTransport();
-        $transport->queryResponse = ['statusCode' => 200, 'body' => ['hash' => '0xdeadbeef', 'txHashes' => []]];
+        $transport->queryResponse = [
+            'statusCode' => 200,
+            'body' => ['hash' => '0xdeadbeef', 'proof' => [], 'proofType' => 'transactionHash'],
+        ];
         $sdk->setTransportForTesting($transport);
 
-        $this->assertSame(['hash' => '0xdeadbeef', 'txHashes' => []], $sdk->queryByHash('0xdeadbeef'));
+        $this->assertSame(
+            ['hash' => '0xdeadbeef', 'proof' => [], 'proofType' => 'transactionHash'],
+            $sdk->queryByHash('0xdeadbeef')
+        );
     }
 
-    public function testQueryByHashRejectsScalarTxHashes(): void
+    public function testQueryByHashDefaultsProofTypeToTransactionHash(): void
     {
         $sdk = $this->makeSdk();
         $transport = new FakeTransport();
-        $transport->queryResponse = ['statusCode' => 200, 'body' => ['hash' => '0xdeadbeef', 'txHash' => '0xabc']];
+        $transport->queryResponse = ['statusCode' => 200, 'body' => ['hash' => '0xdeadbeef', 'proof' => ['0xabc']]];
+        $sdk->setTransportForTesting($transport);
+
+        $result = $sdk->queryByHash('0xdeadbeef');
+
+        $this->assertSame(TracingSDK::MODE_TRANSACTION_HASH, $result['proofType']);
+    }
+
+    public function testQueryByHashRejectsScalarProof(): void
+    {
+        $sdk = $this->makeSdk();
+        $transport = new FakeTransport();
+        $transport->queryResponse = ['statusCode' => 200, 'body' => ['hash' => '0xdeadbeef', 'proof' => '0xabc']];
         $sdk->setTransportForTesting($transport);
 
         $this->expectException(TransportException::class);

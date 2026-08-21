@@ -64,6 +64,9 @@ final class FakeTransport implements HttpTransportInterface
             return $this->queryResponse;
         }
 
-        return ['statusCode' => 200, 'body' => ['hash' => $hash, 'txHashes' => ['0xabc', '0xdef']]];
+        return [
+            'statusCode' => 200,
+            'body' => ['hash' => $hash, 'proof' => ['0xabc', '0xdef'], 'proofType' => 'transactionHash'],
+        ];
     }
 }

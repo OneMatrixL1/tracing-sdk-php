@@ -301,17 +301,17 @@ while (true) {
 
 ## 7. Query anchor theo hash
 
-`queryByHash()` tra cứu hash của một bản ghi để lấy danh sách giao dịch blockchain đã anchor nó, qua `GET {endpoint}/api/anchors?hash=<hash>`. SDK tự URL-encode hash, và áp dụng cấu hình xác thực giống hệt như khi gửi.
+`queryByHash()` tra cứu hash của một bản ghi để lấy danh sách bằng chứng (proof) trên blockchain đã anchor nó, qua `GET {endpoint}/api/anchors?hash=<hash>`. SDK tự URL-encode hash, và áp dụng cấu hình xác thực giống hệt như khi gửi.
 
 ```php
 use Tracing\Sdk\Exception\TransportException;
 
 try {
     $anchor = $sdk->queryByHash('0x1c8a…');
-    // ['hash' => '0x1c8a…', 'txHashes' => ['0x9f42…', '0x3b07…']]
+    // ['hash' => '0x1c8a…', 'proof' => ['0x9f42…', '0x3b07…'], 'proofType' => 'transactionHash']
 
-    foreach ($anchor['txHashes'] as $txHash) {
-        echo $txHash, PHP_EOL;
+    foreach ($anchor['proof'] as $proof) {
+        echo $proof, PHP_EOL;
     }
 } catch (TransportException $e) {
     // Hash chưa được anchor, hoặc không kết nối được tới Indexer.
@@ -324,9 +324,10 @@ Cấu trúc trả về:
 | Khoá | Mô tả |
 | --- | --- |
 | `hash` | Hash của bản ghi đã tra cứu, đúng như Indexer trả lại. |
-| `txHashes` | Mọi giao dịch blockchain đã anchor bản ghi. Một bản ghi có thể được anchor nhiều lần, nên hãy luôn lặp qua danh sách thay vì giả định chỉ có một phần tử. |
+| `proof` | Mọi bằng chứng trên chain đã anchor bản ghi — với `proofType: 'transactionHash'` thì đây là các hash giao dịch. Một bản ghi có thể được anchor nhiều lần, nên hãy luôn lặp qua danh sách thay vì giả định chỉ có một phần tử. |
+| `proofType` | Cách hiểu từng phần tử trong `proof`. Truyền thẳng giá trị này vào `verify()` ở tham số `$mode` (xem [§8](#8-xác-minh-anchor-trên-blockchain)); hiện Indexer chỉ trả về `'transactionHash'`. Nếu Indexer bản cũ không trả về field này thì SDK mặc định là `'transactionHash'`. |
 
-Lỗi: `ConfigException` khi `$hash` rỗng; `TransportException` khi request thất bại, status ngoài dải 2xx (bao gồm `404` cho hash chưa từng được anchor), hoặc body không phải object `{ hash, txHashes }`. Vì vậy hash chưa được anchor là một exception, không phải giá trị `null` — hãy bọc trong `try`/`catch` nếu "chưa có" là kết quả bình thường với bạn.
+Lỗi: `ConfigException` khi `$hash` rỗng; `TransportException` khi request thất bại, status ngoài dải 2xx (bao gồm `404` cho hash chưa từng được anchor), hoặc body không phải object `{ hash, proof }`. Vì vậy hash chưa được anchor là một exception, không phải giá trị `null` — hãy bọc trong `try`/`catch` nếu "chưa có" là kết quả bình thường với bạn.
 
 Việc băm là tất định nên cùng một bản ghi luôn cho ra cùng một hash: hãy lưu lại hash mà `send()`/`sendBatch()` trả về, hoặc tính lại bất cứ lúc nào từ bản ghi gốc bằng `$sdk->hash($rawData)`, rồi query khi cần.
 
@@ -348,11 +349,12 @@ $sdk = new TracingSDK([
 ]);
 
 $hash   = $sdk->hash($rawData);            // hoặc hash do send() trả về
-$anchor = $sdk->queryByHash($hash);        // ['hash' => …, 'txHashes' => [...]]
+$anchor = $sdk->queryByHash($hash);        // ['hash' => …, 'proof' => [...], 'proofType' => …]
 
-foreach ($anchor['txHashes'] as $txHash) {
-    if ($sdk->verify($hash, $txHash)) {
-        echo "đã được anchor trên chain trong {$txHash}", PHP_EOL;
+foreach ($anchor['proof'] as $proof) {
+    // proofType cho verify() biết cách hiểu proof — không cần hardcode mode.
+    if ($sdk->verify($anchor['hash'], $proof, $anchor['proofType'])) {
+        echo "đã được anchor trên chain trong {$proof}", PHP_EOL;
         break;
     }
 }
@@ -381,8 +383,8 @@ verify(
 | Tham số | Mô tả |
 | --- | --- |
 | `$dataHash` | Hash Keccak-256 của bản ghi — từ `hash()`, `send()`, hoặc `queryByHash()`. Phải là chuỗi hex 32 byte. |
-| `$proof` | Bằng chứng trên chain để đối chiếu. Với mode hiện tại, đây là một hash giao dịch, ví dụ một phần tử trong `txHashes` của `queryByHash()`. |
-| `$mode` | Cách hiểu `$proof`. Hiện chỉ có `TracingSDK::MODE_TRANSACTION_HASH` (`'transactionHash'`); tham số này tồn tại để sau này thêm loại bằng chứng khác mà không phải đổi chữ ký hàm. Giá trị khác sẽ ném `ConfigException`. |
+| `$proof` | Bằng chứng trên chain để đối chiếu. Với mode hiện tại, đây là một hash giao dịch, ví dụ một phần tử trong `proof` của `queryByHash()`. |
+| `$mode` | Cách hiểu `$proof` — hãy truyền `proofType` từ `queryByHash()` vào đây. Hiện chỉ có `TracingSDK::MODE_TRANSACTION_HASH` (`'transactionHash'`); tham số này tồn tại để sau này thêm loại bằng chứng khác mà không phải đổi chữ ký hàm. Giá trị khác sẽ ném `ConfigException`. |
 | `$options` | `rpcUrl` và `timeoutMs` cho riêng lần gọi này. Nếu không truyền thì lấy từ `options` trong config. |
 
 ### `true`, `false`, hay exception
@@ -451,7 +453,7 @@ hash(string $rawData, ?SendOptions $options = null): string
     // '0x…' hex Keccak-256
 
 queryByHash(string $hash, ?SendOptions $options = null): array
-    // ['hash' => string, 'txHashes' => string[]]
+    // ['hash' => string, 'proof' => string[], 'proofType' => string]
 
 verify(string $dataHash, string $proof, string $mode = TracingSDK::MODE_TRANSACTION_HASH, ?SendOptions $options = null): bool
     // true khi log của $proof chứa Anchored(bytes32,uint64) với $dataHash

@@ -301,17 +301,17 @@ while (true) {
 
 ## 7. Querying an anchor by hash
 
-`queryByHash()` resolves a record's hash to the blockchain transactions that anchored it, via `GET {endpoint}/api/anchors?hash=<hash>`. The hash is URL-encoded for you, and the configured auth is applied exactly as it is for sending.
+`queryByHash()` resolves a record's hash to the on-chain proofs that anchored it, via `GET {endpoint}/api/anchors?hash=<hash>`. The hash is URL-encoded for you, and the configured auth is applied exactly as it is for sending.
 
 ```php
 use Tracing\Sdk\Exception\TransportException;
 
 try {
     $anchor = $sdk->queryByHash('0x1c8a…');
-    // ['hash' => '0x1c8a…', 'txHashes' => ['0x9f42…', '0x3b07…']]
+    // ['hash' => '0x1c8a…', 'proof' => ['0x9f42…', '0x3b07…'], 'proofType' => 'transactionHash']
 
-    foreach ($anchor['txHashes'] as $txHash) {
-        echo $txHash, PHP_EOL;
+    foreach ($anchor['proof'] as $proof) {
+        echo $proof, PHP_EOL;
     }
 } catch (TransportException $e) {
     // Hash not anchored, or the Indexer was unreachable.
@@ -324,9 +324,10 @@ Return shape:
 | Key | Description |
 | --- | --- |
 | `hash` | The record hash queried, as echoed back by the Indexer. |
-| `txHashes` | Every blockchain transaction the record was anchored in. A record can be anchored more than once, so always iterate rather than assuming a single element. |
+| `proof` | Every on-chain proof the record was anchored by — with `proofType: 'transactionHash'`, the transaction hashes. A record can be anchored more than once, so always iterate rather than assuming a single element. |
+| `proofType` | How each entry in `proof` should be resolved on chain. Pass it straight to `verify()` as its `$mode` (see [§8](#8-verifying-an-anchor-against-the-chain)); today the Indexer only reports `'transactionHash'`. Defaults to `'transactionHash'` if an older Indexer omits the field. |
 
-Errors: `ConfigException` for an empty `$hash`; `TransportException` for a failed request, a non-2xx status (including the `404` for a hash that was never anchored), or a body that is not a `{ hash, txHashes }` object. A not-yet-anchored hash is therefore an exception, not a `null` return — wrap the call in `try`/`catch` when "not there yet" is a normal outcome for you.
+Errors: `ConfigException` for an empty `$hash`; `TransportException` for a failed request, a non-2xx status (including the `404` for a hash that was never anchored), or a body that is not a `{ hash, proof }` object. A not-yet-anchored hash is therefore an exception, not a `null` return — wrap the call in `try`/`catch` when "not there yet" is a normal outcome for you.
 
 Hashing is deterministic, so the same record always yields the same hash: keep the one returned by `send()`/`sendBatch()`, or re-derive it at any time from the original record with `$sdk->hash($rawData)`, and query it whenever you need to.
 
@@ -348,11 +349,12 @@ $sdk = new TracingSDK([
 ]);
 
 $hash   = $sdk->hash($rawData);            // or the hash returned by send()
-$anchor = $sdk->queryByHash($hash);        // ['hash' => …, 'txHashes' => [...]]
+$anchor = $sdk->queryByHash($hash);        // ['hash' => …, 'proof' => [...], 'proofType' => …]
 
-foreach ($anchor['txHashes'] as $txHash) {
-    if ($sdk->verify($hash, $txHash)) {
-        echo "anchored on chain in {$txHash}", PHP_EOL;
+foreach ($anchor['proof'] as $proof) {
+    // proofType tells verify() how to resolve the proof — no need to hardcode a mode.
+    if ($sdk->verify($anchor['hash'], $proof, $anchor['proofType'])) {
+        echo "anchored on chain in {$proof}", PHP_EOL;
         break;
     }
 }
@@ -381,8 +383,8 @@ verify(
 | Parameter | Description |
 | --- | --- |
 | `$dataHash` | The record's Keccak-256 hash — from `hash()`, `send()`, or `queryByHash()`. Must be 32 bytes of hex. |
-| `$proof` | The on-chain evidence to check the hash against. With the current mode this is a transaction hash, e.g. one element of `queryByHash()`'s `txHashes`. |
-| `$mode` | How `$proof` should be interpreted. Only `TracingSDK::MODE_TRANSACTION_HASH` (`'transactionHash'`) exists today; the parameter is there so other proof kinds can be added without breaking the signature. Anything else throws `ConfigException`. |
+| `$proof` | The on-chain evidence to check the hash against. With the current mode this is a transaction hash, e.g. one element of `queryByHash()`'s `proof`. |
+| `$mode` | How `$proof` should be interpreted — pass `queryByHash()`'s `proofType` here. Only `TracingSDK::MODE_TRANSACTION_HASH` (`'transactionHash'`) exists today; the parameter is there so other proof kinds can be added without breaking the signature. Anything else throws `ConfigException`. |
 | `$options` | Per-call `rpcUrl` and `timeoutMs`. Falls back to the config `options`. |
 
 ### `true`, `false`, or an exception
@@ -450,7 +452,7 @@ hash(string $rawData, ?SendOptions $options = null): string
     // '0x…' Keccak-256 hex
 
 queryByHash(string $hash, ?SendOptions $options = null): array
-    // ['hash' => string, 'txHashes' => string[]]
+    // ['hash' => string, 'proof' => string[], 'proofType' => string]
 
 verify(string $dataHash, string $proof, string $mode = TracingSDK::MODE_TRANSACTION_HASH, ?SendOptions $options = null): bool
     // true when $proof's logs contain Anchored(bytes32,uint64) with $dataHash
