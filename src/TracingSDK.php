@@ -21,6 +21,7 @@ use Tracing\Sdk\Rpc\RpcTransportInterface;
 use Tracing\Sdk\Transport\CurlHttpTransport;
 use Tracing\Sdk\Transport\HttpTransportInterface;
 use Tracing\Sdk\Verify\AnchoredEventDecoder;
+use Tracing\Sdk\Verify\MerkleProof;
 
 /**
  * Canonicalizes a record, hashes it with Keccak-256, and sends the resulting
@@ -33,11 +34,18 @@ class TracingSDK
     public const DATA_TYPE_RAW = 'raw';
 
     /**
-     * verify() modes — how the proof it is handed should be resolved on chain.
-     * Only transaction hashes are supported for now; the parameter exists so
-     * other proof kinds can be added without changing the signature.
+     * verify() mode for proofs that are transaction hashes: each proof is a
+     * transaction whose Anchored event carries the record hash itself.
      */
     public const MODE_TRANSACTION_HASH = 'transactionHash';
+
+    /**
+     * verify() mode for Merkle proofs: the proof is one array whose first
+     * element is the transaction hash and whose remaining elements are the
+     * record's sibling hashes, leaf to root. The transaction's Anchored event
+     * carries the Merkle root (see Verify\MerkleProof for the tree layout).
+     */
+    public const MODE_MERKLE_PROOF = 'merkleProof';
 
     /** @var array<string, CanonicalizerInterface> */
     private $canonicalizers = [];
@@ -220,47 +228,119 @@ class TracingSDK
      * Check a query result against the chain itself: fetch the proof's
      * transaction logs from the configured JSON-RPC endpoint, ABI-decode the
      * ones emitted as Anchored(bytes32,uint64), and report whether one of them
-     * carries exactly this data hash.
+     * carries the expected hash.
+     *
+     * $proof is either the whole proof array from queryByHash() or one element
+     * of it; pass queryByHash()'s proofType as $mode, so
+     * verify($anchor['hash'], $anchor['proof'], $anchor['proofType']) works for
+     * every proof kind:
+     *  - MODE_TRANSACTION_HASH: each element is a transaction, checked in
+     *    order until one carries an Anchored event with the data hash itself;
+     *  - MODE_MERKLE_PROOF: the array is [transaction hash, sibling hashes...].
+     *    The siblings fold the data hash into a Merkle root
+     *    (Verify\MerkleProof::computeRoot), and the transaction must carry an
+     *    Anchored event with that root. A lone element is a one-leaf tree,
+     *    whose root is the data hash itself.
      *
      * A log matches when its topics[0] equals keccak256 of the event
-     * signature and its decoded bytes32 argument equals $dataHash. The
-     * bytes32 is read from topics[1] when the argument is indexed and from
-     * the log data otherwise, so both layouts verify.
+     * signature and its decoded bytes32 argument equals the expected hash. The
+     * bytes32 is read from topics[1] when the argument is indexed and from the
+     * log data otherwise, so both layouts verify.
      *
      * @param string $dataHash the record hash, as returned by hash()/send()
-     * @param string $proof the on-chain proof to check the hash against; with
-     *        MODE_TRANSACTION_HASH this is one of the proofs from queryByHash()
+     * @param string|array<int, string> $proof queryByHash()'s proof, or one
+     *        element of it
      * @param string $mode one of the self::MODE_* constants
      * @param SendOptions|null $options per-call overrides; falls back to config.
      *        An rpcUrl must be given here or in the config "options".
-     * @return bool true when the transaction anchored this data hash
-     * @throws ConfigException if dataHash or proof is empty or malformed, the
-     *         mode is unsupported, or no rpcUrl is given here or in config
-     * @throws TransportException if the RPC call fails or the node does not
-     *         know the transaction
+     * @return bool true when the chain confirms the record was anchored
+     * @throws ConfigException if dataHash or a proof element is empty or not 32
+     *         bytes of hex, the proof is empty, the mode is unsupported, or no
+     *         rpcUrl is given here or in config
+     * @throws TransportException if an RPC call fails or the node does not
+     *         know a transaction
      */
     public function verify(
         string $dataHash,
-        string $proof,
+        $proof,
         string $mode = self::MODE_TRANSACTION_HASH,
         ?SendOptions $options = null
     ): bool {
-        if ($mode !== self::MODE_TRANSACTION_HASH) {
+        if ($mode !== self::MODE_TRANSACTION_HASH && $mode !== self::MODE_MERKLE_PROOF) {
             throw new ConfigException(\sprintf(
-                'Unsupported verify mode "%s", expected "%s"',
+                'Unsupported verify mode "%s", expected "%s" or "%s"',
                 $mode,
-                self::MODE_TRANSACTION_HASH
+                self::MODE_TRANSACTION_HASH,
+                self::MODE_MERKLE_PROOF
             ));
         }
 
         $dataHash = AnchoredEventDecoder::normalizeHash($dataHash, 'dataHash');
-        $txHash = AnchoredEventDecoder::normalizeHash($proof, 'proof');
+        $elements = $this->normalizeProof($proof);
+        $rpcUrl = $this->rpcUrlFor($options);
 
-        $receipt = $this->rpcTransport->getTransactionReceipt(
-            $this->rpcUrlFor($options),
-            $txHash,
-            $this->timeoutMsFor($options)
-        );
+        if ($mode === self::MODE_MERKLE_PROOF) {
+            // proof = [transaction hash, sibling hashes leaf-to-root]; the
+            // transaction anchors the root the siblings fold the leaf into.
+            $root = MerkleProof::computeRoot($dataHash, \array_slice($elements, 1));
+
+            return $this->anchors($rpcUrl, $elements[0], $root, $options);
+        }
+
+        foreach ($elements as $txHash) {
+            if ($this->anchors($rpcUrl, $txHash, $dataHash, $options)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Validate a verify() proof — one element or the whole array — as a
+     * non-empty list of normalized 32-byte hashes.
+     *
+     * @param mixed $proof
+     * @return array<int, string>
+     * @throws ConfigException
+     */
+    private function normalizeProof($proof): array
+    {
+        if (\is_string($proof)) {
+            return [AnchoredEventDecoder::normalizeHash($proof, 'proof')];
+        }
+
+        if (!\is_array($proof)) {
+            throw new ConfigException('proof must be a string or an array of strings');
+        }
+
+        if ($proof === []) {
+            throw new ConfigException('proof is required');
+        }
+
+        $elements = [];
+
+        foreach (array_values($proof) as $i => $element) {
+            if (!\is_string($element)) {
+                throw new ConfigException(\sprintf('proof[%d] must be a string', $i));
+            }
+
+            $elements[] = AnchoredEventDecoder::normalizeHash($element, \sprintf('proof[%d]', $i));
+        }
+
+        return $elements;
+    }
+
+    /**
+     * Whether the transaction's receipt holds an Anchored event carrying
+     * $anchoredHash.
+     *
+     * @throws TransportException if the RPC call fails or the node does not
+     *         know the transaction
+     */
+    private function anchors(string $rpcUrl, string $txHash, string $anchoredHash, ?SendOptions $options): bool
+    {
+        $receipt = $this->rpcTransport->getTransactionReceipt($rpcUrl, $txHash, $this->timeoutMsFor($options));
 
         if ($receipt === null) {
             throw new TransportException(\sprintf('Transaction %s was not found on the RPC endpoint', $txHash));
@@ -271,7 +351,7 @@ class TracingSDK
         foreach ($logs as $log) {
             $event = $this->eventDecoder->decode($log);
 
-            if ($event !== null && $event['dataHash'] === $dataHash) {
+            if ($event !== null && $event['dataHash'] === $anchoredHash) {
                 return true;
             }
         }

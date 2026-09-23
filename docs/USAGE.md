@@ -255,7 +255,7 @@ All SDK exceptions extend `Tracing\Sdk\Exception\TracingSdkException` (itself a 
 
 | Exception | Raised when |
 | --- | --- |
-| `ConfigException` | Missing/invalid config, unsupported `dataType`, `auth.type` or `verify()` mode, a `timeoutMs` of `0` or less, an empty `rpcUrl` or none at all when verifying, missing `signingTime`, a batch record without `rawData`/`signingTime`, empty `hash`, or a `dataHash`/`proof` that is not a 32-byte hex string. |
+| `ConfigException` | Missing/invalid config, unsupported `dataType`, `auth.type` or `verify()` mode, a `timeoutMs` of `0` or less, an empty `rpcUrl` or none at all when verifying, missing `signingTime`, a batch record without `rawData`/`signingTime`, empty `hash`, an empty `proof`, or a `dataHash`/proof element that is not a 32-byte hex string. |
 | `CanonicalizationException` | `rawData` cannot be canonicalized for the chosen data type (e.g. malformed JSON/XML). |
 | `TransportException` | The HTTP request failed (network, or it exceeded `timeoutMs` — 10 s by default), the Indexer answered with a non-2xx status, or the RPC node rejected the call / does not know the proof transaction. |
 
@@ -351,30 +351,47 @@ $sdk = new TracingSDK([
 $hash   = $sdk->hash($rawData);            // or the hash returned by send()
 $anchor = $sdk->queryByHash($hash);        // ['hash' => …, 'proof' => [...], 'proofType' => …]
 
-foreach ($anchor['proof'] as $proof) {
-    // proofType tells verify() how to resolve the proof — no need to hardcode a mode.
-    if ($sdk->verify($anchor['hash'], $proof, $anchor['proofType'])) {
-        echo "anchored on chain in {$proof}", PHP_EOL;
-        break;
-    }
+// Pass the whole query result: proofType tells verify() how to read proof,
+// so the same call works for every proof kind.
+if ($sdk->verify($anchor['hash'], $anchor['proof'], $anchor['proofType'])) {
+    echo 'anchored on chain', PHP_EOL;
 }
 ```
+
+The proof kinds (`proofType`, and the `$mode` argument):
+
+| Mode | `proof` holds | Verified when |
+| --- | --- | --- |
+| `TracingSDK::MODE_TRANSACTION_HASH` (`'transactionHash'`) | One or more transaction hashes. | One of the transactions has an `Anchored` event carrying the record hash itself. They are checked in order, stopping at the first match. |
+| `TracingSDK::MODE_MERKLE_PROOF` (`'merkleProof'`) | One Merkle proof: the transaction hash first, then the record's sibling hashes from leaf to root. | The siblings fold the record hash into a Merkle root, and the transaction has an `Anchored` event carrying that root. |
+
+To check a single transaction yourself, pass one proof element: `verify($anchor['hash'], $anchor['proof'][0], $anchor['proofType'])`. In Merkle mode, one element on its own is a one-leaf tree, whose root is the record hash itself.
 
 ### What it does
 
 1. Calls `eth_getTransactionReceipt` with the proof transaction hash on the configured `rpcUrl` — a plain JSON-RPC 2.0 POST, with no Indexer auth attached.
 2. Walks the receipt's logs and keeps the ones whose `topics[0]` equals `keccak256("Anchored(bytes32,uint64)")`.
-3. ABI-decodes each of those as `Anchored(bytes32 dataHash, uint64 signingTime)`.
-4. Returns `true` as soon as one decoded `dataHash` equals the hash you passed, `false` if none does.
+3. ABI-decodes each of those as `Anchored(bytes32, uint64 signingTime)`. The `bytes32` is the record hash, or in Merkle mode the Merkle root.
+4. Returns `true` as soon as one decoded `bytes32` equals the expected value, `false` if none does.
 
 Both event layouts decode: an indexed `bytes32` is read from `topics[1]`, a non-indexed one from the log data. Comparison is on normalized hashes, so case and a missing `0x` prefix do not matter. Logs from other events in the same transaction are ignored.
+
+### Merkle proofs
+
+Merkle trees use Keccak-256 with sorted pairs, the layout of OpenZeppelin's `MerkleProof.verify` (and of merkletreejs with `sortPairs: true`):
+
+- **Leaf:** the record hash itself, as returned by `hash()`. It is not hashed again.
+- **Parent:** `keccak256(a ‖ b)`, with the two 32-byte nodes in ascending byte order. Proofs therefore carry no left/right flags, but siblings must still be ordered from the leaf up to the root.
+- **Odd node out:** promoted to the next level unchanged.
+
+`Tracing\Sdk\Verify\MerkleProof::computeRoot($leaf, $siblings)` exposes the root calculation on its own. `testdata/merkle.json` holds the shared test vectors, computed by merkletreejs.
 
 ### Signature
 
 ```php
 verify(
     string $dataHash,                                  // the record hash
-    string $proof,                                     // the on-chain proof
+    $proof,                                            // queryByHash()'s proof array, or one string element of it
     string $mode = TracingSDK::MODE_TRANSACTION_HASH,   // how to resolve the proof
     ?SendOptions $options = null                        // per-call rpcUrl / timeoutMs
 ): bool
@@ -383,17 +400,17 @@ verify(
 | Parameter | Description |
 | --- | --- |
 | `$dataHash` | The record's Keccak-256 hash — from `hash()`, `send()`, or `queryByHash()`. Must be 32 bytes of hex. |
-| `$proof` | The on-chain evidence to check the hash against. With the current mode this is a transaction hash, e.g. one element of `queryByHash()`'s `proof`. |
-| `$mode` | How `$proof` should be interpreted — pass `queryByHash()`'s `proofType` here. Only `TracingSDK::MODE_TRANSACTION_HASH` (`'transactionHash'`) exists today; the parameter is there so other proof kinds can be added without breaking the signature. Anything else throws `ConfigException`. |
+| `$proof` | The on-chain evidence to check the hash against: `queryByHash()`'s whole `proof` array, or one element of it. Every element must be 32 bytes of hex. |
+| `$mode` | How `$proof` should be interpreted — pass `queryByHash()`'s `proofType` here: `TracingSDK::MODE_TRANSACTION_HASH` (`'transactionHash'`) or `TracingSDK::MODE_MERKLE_PROOF` (`'merkleProof'`). Anything else throws `ConfigException`. |
 | `$options` | Per-call `rpcUrl` and `timeoutMs`. Falls back to the config `options`. |
 
 ### `true`, `false`, or an exception
 
 | Outcome | Meaning |
 | --- | --- |
-| `true` | The transaction really does contain an `Anchored` event carrying this data hash. |
-| `false` | The transaction exists, but no `Anchored` event in it carries this hash — the record was not anchored by this transaction. |
-| `ConfigException` | Bad input or config: malformed `dataHash`/`proof`, unsupported `$mode`, or no `rpcUrl` anywhere. |
+| `true` | The transaction really does contain an `Anchored` event carrying this data hash (or, in Merkle mode, the root its proof leads to). |
+| `false` | The transaction exists, but no `Anchored` event in it carries the expected value — the record was not anchored by this transaction. For a Merkle proof, also when a sibling is wrong or out of order. |
+| `ConfigException` | Bad input or config: a malformed `dataHash` or proof element, an empty proof, an unsupported `$mode`, or no `rpcUrl` anywhere. |
 | `TransportException` | The RPC endpoint was unreachable, returned a non-2xx status or a JSON-RPC error, or does not know the transaction (an unmined, dropped, or wrong-chain hash — the node returns a `null` receipt). |
 
 A `false` is a real answer about a real transaction; a missing transaction is an exception, because "the node has never heard of it" says nothing about whether the record was anchored.
@@ -426,7 +443,7 @@ try {
 | [`example.php`](../example/php/example.php) | Several JSON records in one request with `sendBatch()` |
 | [`xml-example.php`](../example/php/xml-example.php) | The batch flow with `SendOptions::dataType('xml')` |
 | [`query-example.php`](../example/php/query-example.php) | Sending a record, then looking the anchor up with `queryByHash()` |
-| [`verify-example.php`](../example/php/verify-example.php) | Query, then `verify()` each proof transaction against an RPC node |
+| [`verify-example.php`](../example/php/verify-example.php) | Query, then `verify()` the proof against an RPC node — each transaction, or the Merkle proof |
 
 Each script points at `http://localhost:3000` with a placeholder token — edit `endpoint` and `auth` at the top (plus `rpcUrl` for the verify example), then run:
 
@@ -454,10 +471,13 @@ hash(string $rawData, ?SendOptions $options = null): string
 queryByHash(string $hash, ?SendOptions $options = null): array
     // ['hash' => string, 'proof' => string[], 'proofType' => string]
 
-verify(string $dataHash, string $proof, string $mode = TracingSDK::MODE_TRANSACTION_HASH, ?SendOptions $options = null): bool
-    // true when $proof's logs contain Anchored(bytes32,uint64) with $dataHash
+verify(string $dataHash, string|string[] $proof, string $mode = TracingSDK::MODE_TRANSACTION_HASH, ?SendOptions $options = null): bool
+    // verify($anchor['hash'], $anchor['proof'], $anchor['proofType']) — the whole query result, any mode
 
-TracingSDK::MODE_TRANSACTION_HASH   // 'transactionHash' — the only verify mode today
+Verify\MerkleProof::computeRoot(string $leaf, array $siblings): string   // sorted-pair Keccak-256 root
+
+TracingSDK::MODE_TRANSACTION_HASH   // 'transactionHash': proofs are transactions anchoring the record hash
+TracingSDK::MODE_MERKLE_PROOF       // 'merkleProof': proof is [txHash, siblings…]; the transaction anchors the root
 ```
 
 `SendOptions`:

@@ -26,16 +26,29 @@ try {
     $result = $sdk->send(json_encode(['orderId' => 1]), time());
     printf("[sent] %s -> HTTP %d\n", $result['hash'], $result['response']['statusCode']);
 
-    // What the Indexer claims: the transactions this hash was anchored in.
+    // What the Indexer claims: where this hash was anchored.
     $anchor = $sdk->queryByHash($result['hash']);
-    printf("[found] %d tx: %s\n", count($anchor['proof']), implode(', ', $anchor['proof']));
 
     // What the chain says. verify() reads the transaction receipt over RPC and
-    // looks for an Anchored(bytes32,uint64) log carrying this exact hash, so a
-    // wrong or dishonest Indexer answer cannot pass.
-    foreach ($anchor['proof'] as $proof) {
-        $verified = $sdk->verify($anchor['hash'], $proof, $anchor['proofType']);
-        printf("[verify] %s -> %s\n", $proof, $verified ? 'VERIFIED' : 'no matching anchor event');
+    // looks for an Anchored(bytes32,uint64) log carrying the expected value, so
+    // a wrong or dishonest Indexer answer cannot pass.
+    if ($anchor['proofType'] === TracingSDK::MODE_MERKLE_PROOF) {
+        // One proof: [transaction hash, sibling hashes...]. The siblings fold
+        // the record hash into a Merkle root, which the transaction must have
+        // anchored.
+        printf("[found] merkle proof in tx %s, %d sibling(s)\n", $anchor['proof'][0], count($anchor['proof']) - 1);
+
+        $verified = $sdk->verify($anchor['hash'], $anchor['proof'], $anchor['proofType']);
+        printf("[verify] merkle root -> %s\n", $verified ? 'VERIFIED' : 'no matching anchor event');
+    } else {
+        // Transaction hashes: each proof is a transaction whose Anchored event
+        // carries the record hash itself.
+        printf("[found] %d tx: %s\n", count($anchor['proof']), implode(', ', $anchor['proof']));
+
+        foreach ($anchor['proof'] as $proof) {
+            $verified = $sdk->verify($anchor['hash'], $proof, $anchor['proofType']);
+            printf("[verify] %s -> %s\n", $proof, $verified ? 'VERIFIED' : 'no matching anchor event');
+        }
     }
 } catch (\Throwable $e) {
     // A TransportException here can also mean the transaction is not mined yet,

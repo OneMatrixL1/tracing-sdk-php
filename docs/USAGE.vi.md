@@ -255,7 +255,7 @@ Mọi exception của SDK đều kế thừa `Tracing\Sdk\Exception\TracingSdkEx
 
 | Exception | Xảy ra khi |
 | --- | --- |
-| `ConfigException` | Cấu hình thiếu/không hợp lệ, `dataType`, `auth.type` hoặc `mode` của `verify()` không được hỗ trợ, `timeoutMs` bằng `0` hoặc âm, `rpcUrl` rỗng hoặc không có khi verify, thiếu `signingTime`, bản ghi trong batch thiếu `rawData`/`signingTime`, `hash` rỗng, hoặc `dataHash`/`proof` không phải chuỗi hex 32 byte. |
+| `ConfigException` | Cấu hình thiếu/không hợp lệ, `dataType`, `auth.type` hoặc `mode` của `verify()` không được hỗ trợ, `timeoutMs` bằng `0` hoặc âm, `rpcUrl` rỗng hoặc không có khi verify, thiếu `signingTime`, bản ghi trong batch thiếu `rawData`/`signingTime`, `hash` rỗng, `proof` rỗng, hoặc `dataHash`/phần tử proof không phải chuỗi hex 32 byte. |
 | `CanonicalizationException` | Không chuẩn hoá được `rawData` theo kiểu dữ liệu đã chọn (ví dụ JSON/XML sai định dạng). |
 | `TransportException` | Request HTTP thất bại (lỗi mạng, hoặc vượt quá `timeoutMs` — mặc định 10 giây), Indexer trả về status ngoài dải 2xx, hoặc node RPC báo lỗi / không biết giao dịch dùng làm proof. |
 
@@ -351,30 +351,47 @@ $sdk = new TracingSDK([
 $hash   = $sdk->hash($rawData);            // hoặc hash do send() trả về
 $anchor = $sdk->queryByHash($hash);        // ['hash' => …, 'proof' => [...], 'proofType' => …]
 
-foreach ($anchor['proof'] as $proof) {
-    // proofType cho verify() biết cách hiểu proof — không cần hardcode mode.
-    if ($sdk->verify($anchor['hash'], $proof, $anchor['proofType'])) {
-        echo "đã được anchor trên chain trong {$proof}", PHP_EOL;
-        break;
-    }
+// Truyền nguyên kết quả query: proofType cho verify() biết cách hiểu proof,
+// nên cùng một lời gọi dùng được cho mọi loại bằng chứng.
+if ($sdk->verify($anchor['hash'], $anchor['proof'], $anchor['proofType'])) {
+    echo 'đã được anchor trên chain', PHP_EOL;
 }
 ```
+
+Các loại bằng chứng (`proofType`, cũng là tham số `$mode`):
+
+| Mode | `proof` chứa gì | Xác minh thành công khi |
+| --- | --- | --- |
+| `TracingSDK::MODE_TRANSACTION_HASH` (`'transactionHash'`) | Một hoặc nhiều hash giao dịch. | Một trong các giao dịch có event `Anchored` mang chính hash của bản ghi. Các giao dịch được kiểm tra lần lượt, dừng ở giao dịch khớp đầu tiên. |
+| `TracingSDK::MODE_MERKLE_PROOF` (`'merkleProof'`) | Một Merkle proof: phần tử đầu là hash giao dịch, tiếp theo là các hash sibling (nút anh em) của bản ghi, theo thứ tự từ lá lên gốc. | Các sibling gộp hash của bản ghi thành một Merkle root, và giao dịch có event `Anchored` mang đúng root đó. |
+
+Muốn tự kiểm tra từng giao dịch, hãy truyền một phần tử của proof: `verify($anchor['hash'], $anchor['proof'][0], $anchor['proofType'])`. Ở mode Merkle, một phần tử đứng riêng là cây chỉ có một lá, và root chính là hash của bản ghi.
 
 ### Cách hoạt động
 
 1. Gọi `eth_getTransactionReceipt` với hash giao dịch proof tới `rpcUrl` đã cấu hình — chỉ là một POST JSON-RPC 2.0 thuần, không gắn kèm thông tin xác thực của Indexer.
 2. Duyệt các log trong receipt và giữ lại những log có `topics[0]` bằng `keccak256("Anchored(bytes32,uint64)")`.
-3. ABI-decode từng log đó theo `Anchored(bytes32 dataHash, uint64 signingTime)`.
-4. Trả về `true` ngay khi có một `dataHash` giải mã được trùng với hash bạn truyền vào, `false` nếu không có log nào trùng.
+3. ABI-decode từng log đó theo `Anchored(bytes32, uint64 signingTime)`. `bytes32` là hash của bản ghi, hoặc ở mode Merkle là Merkle root.
+4. Trả về `true` ngay khi có một `bytes32` giải mã được trùng với giá trị mong đợi, `false` nếu không có log nào trùng.
 
 Cả hai cách khai báo event đều giải mã được: `bytes32` có `indexed` được đọc từ `topics[1]`, không `indexed` thì đọc từ phần data của log. Việc so sánh dùng hash đã chuẩn hoá, nên chữ hoa/thường hay thiếu tiền tố `0x` không ảnh hưởng. Log của các event khác trong cùng giao dịch bị bỏ qua.
+
+### Merkle proof
+
+Cây Merkle dùng Keccak-256 với cặp đã sắp xếp (sorted pairs), giống cách của `MerkleProof.verify` trong OpenZeppelin (và merkletreejs với `sortPairs: true`):
+
+- **Lá:** chính hash của bản ghi, như `hash()` trả về. Không băm thêm lần nữa.
+- **Nút cha:** `keccak256(a ‖ b)`, trong đó hai nút 32 byte được xếp theo thứ tự byte tăng dần. Vì vậy proof không cần cờ trái/phải, nhưng các sibling vẫn phải theo thứ tự từ lá lên gốc.
+- **Nút lẻ:** được đưa thẳng lên tầng trên, giữ nguyên.
+
+`Tracing\Sdk\Verify\MerkleProof::computeRoot($leaf, $siblings)` cho phép tự tính root. `testdata/merkle.json` chứa bộ test vector dùng chung, được tính bằng merkletreejs.
 
 ### Chữ ký hàm
 
 ```php
 verify(
     string $dataHash,                                  // hash của bản ghi
-    string $proof,                                     // bằng chứng trên chain
+    $proof,                                            // mảng proof từ queryByHash(), hoặc một phần tử (chuỗi) của nó
     string $mode = TracingSDK::MODE_TRANSACTION_HASH,   // cách hiểu proof
     ?SendOptions $options = null                        // rpcUrl / timeoutMs theo lần gọi
 ): bool
@@ -383,17 +400,17 @@ verify(
 | Tham số | Mô tả |
 | --- | --- |
 | `$dataHash` | Hash Keccak-256 của bản ghi — từ `hash()`, `send()`, hoặc `queryByHash()`. Phải là chuỗi hex 32 byte. |
-| `$proof` | Bằng chứng trên chain để đối chiếu. Với mode hiện tại, đây là một hash giao dịch, ví dụ một phần tử trong `proof` của `queryByHash()`. |
-| `$mode` | Cách hiểu `$proof` — hãy truyền `proofType` từ `queryByHash()` vào đây. Hiện chỉ có `TracingSDK::MODE_TRANSACTION_HASH` (`'transactionHash'`); tham số này tồn tại để sau này thêm loại bằng chứng khác mà không phải đổi chữ ký hàm. Giá trị khác sẽ ném `ConfigException`. |
+| `$proof` | Bằng chứng trên chain để đối chiếu: toàn bộ mảng `proof` của `queryByHash()`, hoặc một phần tử của nó. Mỗi phần tử phải là chuỗi hex 32 byte. |
+| `$mode` | Cách hiểu `$proof` — hãy truyền `proofType` từ `queryByHash()` vào đây: `TracingSDK::MODE_TRANSACTION_HASH` (`'transactionHash'`) hoặc `TracingSDK::MODE_MERKLE_PROOF` (`'merkleProof'`). Giá trị khác sẽ ném `ConfigException`. |
 | `$options` | `rpcUrl` và `timeoutMs` cho riêng lần gọi này. Nếu không truyền thì lấy từ `options` trong config. |
 
 ### `true`, `false`, hay exception
 
 | Kết quả | Ý nghĩa |
 | --- | --- |
-| `true` | Giao dịch thực sự chứa event `Anchored` mang đúng data hash này. |
-| `false` | Giao dịch tồn tại, nhưng không có event `Anchored` nào trong đó mang hash này — bản ghi không được anchor bởi giao dịch này. |
-| `ConfigException` | Sai đầu vào hoặc cấu hình: `dataHash`/`proof` sai định dạng, `$mode` không được hỗ trợ, hoặc không có `rpcUrl` ở đâu cả. |
+| `true` | Giao dịch thực sự chứa event `Anchored` mang đúng data hash này (hoặc, ở mode Merkle, đúng root mà proof dẫn tới). |
+| `false` | Giao dịch tồn tại, nhưng không có event `Anchored` nào trong đó mang giá trị mong đợi — bản ghi không được anchor bởi giao dịch này. Với Merkle proof, kết quả cũng là `false` khi một sibling sai hoặc sai thứ tự. |
+| `ConfigException` | Sai đầu vào hoặc cấu hình: `dataHash` hoặc một phần tử proof sai định dạng, proof rỗng, `$mode` không được hỗ trợ, hoặc không có `rpcUrl` ở đâu cả. |
 | `TransportException` | Không kết nối được endpoint RPC, endpoint trả về status ngoài dải 2xx hoặc lỗi JSON-RPC, hoặc node không biết giao dịch (hash chưa được mine, đã bị drop, hoặc thuộc chain khác — node trả receipt `null`). |
 
 `false` là câu trả lời thật về một giao dịch thật; còn giao dịch không tồn tại là exception, vì "node chưa từng thấy nó" không nói lên được bản ghi đã được anchor hay chưa.
@@ -427,7 +444,7 @@ Thư mục `example/php/` chứa các script hoàn chỉnh:
 | [`example.php`](../example/php/example.php) | Nhiều bản ghi JSON trong một request với `sendBatch()` |
 | [`xml-example.php`](../example/php/xml-example.php) | Luồng batch với `SendOptions::dataType('xml')` |
 | [`query-example.php`](../example/php/query-example.php) | Gửi một bản ghi rồi tra cứu anchor bằng `queryByHash()` |
-| [`verify-example.php`](../example/php/verify-example.php) | Query rồi `verify()` từng giao dịch proof với node RPC |
+| [`verify-example.php`](../example/php/verify-example.php) | Query rồi `verify()` proof với node RPC — từng giao dịch, hoặc Merkle proof |
 
 Mỗi script trỏ tới `http://localhost:3000` với token giả — sửa `endpoint` và `auth` ở đầu file (thêm `rpcUrl` với ví dụ verify), rồi chạy:
 
@@ -455,10 +472,13 @@ hash(string $rawData, ?SendOptions $options = null): string
 queryByHash(string $hash, ?SendOptions $options = null): array
     // ['hash' => string, 'proof' => string[], 'proofType' => string]
 
-verify(string $dataHash, string $proof, string $mode = TracingSDK::MODE_TRANSACTION_HASH, ?SendOptions $options = null): bool
-    // true khi log của $proof chứa Anchored(bytes32,uint64) với $dataHash
+verify(string $dataHash, string|string[] $proof, string $mode = TracingSDK::MODE_TRANSACTION_HASH, ?SendOptions $options = null): bool
+    // verify($anchor['hash'], $anchor['proof'], $anchor['proofType']) — nguyên kết quả query, mọi mode
 
-TracingSDK::MODE_TRANSACTION_HASH   // 'transactionHash' — mode verify duy nhất hiện nay
+Verify\MerkleProof::computeRoot(string $leaf, array $siblings): string   // root Keccak-256 theo sorted pairs
+
+TracingSDK::MODE_TRANSACTION_HASH   // 'transactionHash': proof là các giao dịch anchor chính hash của bản ghi
+TracingSDK::MODE_MERKLE_PROOF       // 'merkleProof': proof là [txHash, siblings…]; giao dịch anchor Merkle root
 ```
 
 `SendOptions`:
