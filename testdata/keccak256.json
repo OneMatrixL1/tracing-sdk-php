@@ -23,6 +23,11 @@
             "id": "quick-brown-fox",
             "input": "The quick brown fox jumps over the lazy dog",
             "expectedHash": "0x4d741b6f1eb29cb2a9b9911c82f56fa8d73b04959d3d9d222895df6c0b28aa15"
+        },
+        {
+            "id": "utf-8-multibyte",
+            "input": "café 日本語 😀",
+            "expectedHash": "0x4e1bf39d839ecda1c521af7082751f6a8b7bc0cc8ef0c69cbffa09d84f20c454"
         }
     ]
 }

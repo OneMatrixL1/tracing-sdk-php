@@ -6,7 +6,8 @@
         "numberFormat": "ECMAScript Number::toString (RFC 8785 section 3.2.2.3) — shortest round-trippable decimal digits, plain/decimal/exponential form chosen by magnitude, integers and equal-valued floats collapse to the same output, -0 normalizes to 0",
         "objectVsArray": "a JSON object and a JSON array are distinct types even when an object's keys happen to be sequential integers starting at 0 (see `object-with-sequential-numeric-keys-stays-an-object`) — do not use an array/list heuristic to decide the output shape",
         "whitespace": "none (compact)",
-        "escaping": "forward slashes, non-ASCII characters, and U+2028/U+2029 line separators NOT escaped (equivalent to PHP's JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_LINE_TERMINATORS)"
+        "escaping": "forward slashes, non-ASCII characters, and U+2028/U+2029 line separators NOT escaped (equivalent to PHP's JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_LINE_TERMINATORS)",
+        "parsing": "strict RFC 8259 input, as PHP's json_decode accepts it: at most 511 levels of nesting, the last of duplicate member names wins, and a byte order mark, a lone surrogate, a number that overflows to Infinity, a leading zero, or a trailing comma is an error"
     },
     "cases": [
         {
@@ -272,6 +273,76 @@
             "description": "Malformed JSON must raise an error, not silently canonicalize",
             "input": "{not-json",
             "expectError": true
+        },
+        {
+            "id": "duplicate-keys-last-wins",
+            "description": "When an object repeats a member name, the last value wins, as in JSON.parse and PHP json_decode",
+            "input": "{\"a\":1,\"b\":2,\"a\":3}",
+            "expectedOutput": "{\"a\":3,\"b\":2}"
+        },
+        {
+            "id": "nesting-511-levels-accepted",
+            "description": "511 levels of nested containers are accepted",
+            "input": "[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]",
+            "expectedOutput": "[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]"
+        },
+        {
+            "id": "nesting-512-levels-rejected",
+            "description": "512 levels of nested containers exceed the maximum depth and must raise an error",
+            "input": "[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]",
+            "expectError": true
+        },
+        {
+            "id": "lone-surrogate-rejected",
+            "description": "An unpaired UTF-16 surrogate escape is not a Unicode character and has no UTF-8 encoding, so it must raise an error, in a value or a key",
+            "inputs": [
+                "\"\\ud800\"",
+                "{\"\\udc00\":1}",
+                "[\"a\\ud800b\"]"
+            ],
+            "expectError": true
+        },
+        {
+            "id": "number-overflow-rejected",
+            "description": "A number too large for an IEEE 754 double (it would become Infinity) must raise an error",
+            "inputs": ["{\"a\":1e400}", "[-1e400]"],
+            "expectError": true
+        },
+        {
+            "id": "leading-zero-rejected",
+            "description": "A number with a leading zero is not valid JSON",
+            "input": "{\"a\":01}",
+            "expectError": true
+        },
+        {
+            "id": "trailing-comma-rejected",
+            "description": "A trailing comma is not valid JSON",
+            "inputs": ["[1,]", "{\"a\":1,}"],
+            "expectError": true
+        },
+        {
+            "id": "byte-order-mark-rejected",
+            "description": "A leading byte order mark is not valid JSON and must raise an error rather than be skipped",
+            "input": "\ufeff{}",
+            "expectError": true
+        },
+        {
+            "id": "control-characters-escaped",
+            "description": "Control characters are escaped with the short forms where JSON has them (\\b \\f \\n \\r \\t) and as lowercase \\u00XX otherwise; DEL (U+007F) is not a control character for JSON and stays literal",
+            "input": "{\"a\":\"\\u0001\\u001F\\b\\f\\n\\r\\t\\u007f\"}",
+            "expectedOutput": "{\"a\":\"\\u0001\\u001f\\b\\f\\n\\r\\t\u007f\"}"
+        },
+        {
+            "id": "unnecessary-escapes-decoded",
+            "description": "Escapes JCS does not require (for \"/\", non-ASCII, and printable ASCII) are decoded to the literal character",
+            "inputs": ["{\"a\":\"\\u00e9\\/\\u0041\"}", "{\"a\":\"é/A\"}"],
+            "expectedOutput": "{\"a\":\"é/A\"}"
+        },
+        {
+            "id": "top-level-scalar",
+            "description": "A top-level scalar canonicalizes like any value",
+            "input": " \"a\\/b\" ",
+            "expectedOutput": "\"a/b\""
         }
     ]
 }
